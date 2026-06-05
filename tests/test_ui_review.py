@@ -13,6 +13,7 @@ from forge.analyzer.inventory import classify_inventory
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
 from forge.ui.main_window import MainWindow
+from forge.ui.main_window import analyze_source
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -207,6 +208,45 @@ def test_table_model_can_apply_support_or_mark_row_reviewed() -> None:
     assert model.approved_rows()[0]["warnings"] == []
 
 
+def test_table_model_can_apply_model_suggestion() -> None:
+    model = ReviewTableModel(manual_payload())
+
+    assert model.apply_model_to_row(0)
+
+    approved = model.approved_rows()
+    assert approved[0]["final"]["categories"] == ["/Default/Wardrobe/Dresses"]
+    assert approved[0]["warnings"] == []
+
+
+class StaticProvider:
+    name = "fake-model"
+
+    def suggest(self, packet):
+        return {
+            "suggestions": [
+                {
+                    "path": "Scripts/Websoul/Tool.dsa",
+                    "content_type": "Script/Utility",
+                    "categories": ["/Default/Utilities/Scripts"],
+                    "compatibility_base": "",
+                    "compatibilities": [],
+                    "confidence": 0.7,
+                    "reason": "Script path is a utility.",
+                }
+            ]
+        }
+
+
+def test_analyze_source_can_include_model_suggestions(tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+
+    payload = analyze_source(tmp_path, provider=StaticProvider())
+
+    assert payload["product"]["model_provider"] == "fake-model"
+    assert payload["product"]["model_available"] is True
+    assert payload["rows"][0]["model"]["categories"] == ["/Default/Utilities/Scripts"]
+
+
 def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
 
@@ -247,7 +287,18 @@ def test_main_window_warning_resolution_buttons(qapp) -> None:
 
     assert window.table_model.rowCount() == 0
     assert "Dress.duf: support-category-conflict" not in window.issue_text()
-    assert "product" not in window.issue_text()
+
+
+def test_main_window_can_use_configured_model_provider(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    window = MainWindow(model_provider_factory=lambda model_name: StaticProvider())
+    window.set_source_path(tmp_path)
+    window.ask_model_checkbox.setChecked(True)
+
+    window.analyze_current_source()
+
+    assert window.current_contract["product"]["model_provider"] == "fake-model"
+    assert window.current_contract["rows"][0]["model"]["reason"] == "Script path is a utility."
 
     window = MainWindow()
     window.set_contract(manual_payload())

@@ -141,24 +141,30 @@ class ReviewTableModel(QAbstractTableModel):
         return "\n".join(section for section in sections if section is not None)
 
     def apply_support_to_row(self, visible_row: int) -> bool:
-        if visible_row < 0 or visible_row >= len(self._visible_row_indexes):
-            return False
-        row = self._visible_row(visible_row)
-        support = row.get("support")
-        if not support:
-            return False
-        final = row.setdefault("final", {})
-        for key in ("content_type", "categories", "compatibility_base", "compatibilities"):
-            final[key] = deepcopy(support.get(key, [] if key in {"categories", "compatibilities"} else ""))
-        row["warnings"] = []
-        self._refresh_visible_rows()
-        self.layoutChanged.emit()
-        return True
+        return self._apply_metadata_to_row(visible_row, "support")
+
+    def apply_model_to_row(self, visible_row: int) -> bool:
+        return self._apply_metadata_to_row(visible_row, "model")
 
     def mark_row_reviewed(self, visible_row: int) -> bool:
         if visible_row < 0 or visible_row >= len(self._visible_row_indexes):
             return False
         row = self._visible_row(visible_row)
+        row["warnings"] = []
+        self._refresh_visible_rows()
+        self.layoutChanged.emit()
+        return True
+
+    def _apply_metadata_to_row(self, visible_row: int, source_key: str) -> bool:
+        if visible_row < 0 or visible_row >= len(self._visible_row_indexes):
+            return False
+        row = self._visible_row(visible_row)
+        source = row.get(source_key)
+        if not source:
+            return False
+        final = row.setdefault("final", {})
+        for key in ("content_type", "categories", "compatibility_base", "compatibilities"):
+            final[key] = deepcopy(source.get(key, [] if key in {"categories", "compatibilities"} else ""))
         row["warnings"] = []
         self._refresh_visible_rows()
         self.layoutChanged.emit()

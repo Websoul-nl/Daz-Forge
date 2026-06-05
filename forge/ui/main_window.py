@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -24,13 +24,22 @@ from PySide6.QtWidgets import (
 
 from forge.analyzer.inference import infer_metadata
 from forge.analyzer.inventory import classify_inventory
+from forge.analyzer.model_provider import (
+    LMStudioProvider,
+    MetadataSuggestionProvider,
+    build_model_packet,
+    request_model_suggestions,
+)
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
 from forge.ui.review_model import ReviewTableModel
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        model_provider_factory: Callable[[str], MetadataSuggestionProvider] | None = None,
+    ) -> None:
         super().__init__()
         self.setWindowTitle("Daz Forge")
         self.resize(1320, 780)
@@ -38,6 +47,9 @@ class MainWindow(QMainWindow):
 
         self.current_contract: dict[str, Any] = {"rows": [], "warnings": [], "hard_blockers": []}
         self.table_model = ReviewTableModel(self.current_contract)
+        self.model_provider_factory = model_provider_factory or (
+            lambda model_name: LMStudioProvider(model=model_name or "qwen/qwen3-32b", timeout_seconds=120)
+        )
 
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Select a product folder or zip")
@@ -46,6 +58,11 @@ class MainWindow(QMainWindow):
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter rows")
         self.warnings_only_checkbox = QCheckBox("Warnings only")
+        self.ask_model_checkbox = QCheckBox("Ask LM Studio")
+        self.model_name_edit = QLineEdit("qwen/qwen3-32b")
+        self.model_name_edit.setPlaceholderText("LM Studio model")
+        self.model_name_edit.setMinimumWidth(220)
+        self.use_model_button = QPushButton("Use Model")
         self.use_support_button = QPushButton("Use Support")
         self.mark_row_reviewed_button = QPushButton("Mark Row Reviewed")
         self.mark_issue_reviewed_button = QPushButton("Mark Issue Reviewed")
@@ -76,7 +93,10 @@ class MainWindow(QMainWindow):
             self._set_issue_lines(["No source selected."])
             return
         try:
-            contract = analyze_source(Path(source_text))
+            provider = None
+            if self.ask_model_checkbox.isChecked():
+                provider = self.model_provider_factory(self.model_name_edit.text().strip())
+            contract = analyze_source(Path(source_text), provider=provider)
         except Exception as exc:
             self._set_issue_lines([f"Analysis failed: {exc}"])
             return
@@ -162,6 +182,8 @@ class MainWindow(QMainWindow):
         filter_bar = QHBoxLayout()
         filter_bar.addWidget(self.filter_edit, 1)
         filter_bar.addWidget(self.warnings_only_checkbox)
+        filter_bar.addWidget(self.ask_model_checkbox)
+        filter_bar.addWidget(self.model_name_edit)
         layout.addLayout(filter_bar)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -173,6 +195,7 @@ class MainWindow(QMainWindow):
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(8)
         action_bar = QHBoxLayout()
+        action_bar.addWidget(self.use_model_button)
         action_bar.addWidget(self.use_support_button)
         action_bar.addWidget(self.mark_row_reviewed_button)
         detail_layout.addLayout(action_bar)
@@ -198,6 +221,7 @@ class MainWindow(QMainWindow):
         self.source_edit.returnPressed.connect(self.analyze_current_source)
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.warnings_only_checkbox.toggled.connect(self._apply_filter)
+        self.use_model_button.clicked.connect(self.apply_model_to_selected_row)
         self.use_support_button.clicked.connect(self.apply_support_to_selected_row)
         self.mark_row_reviewed_button.clicked.connect(self.mark_selected_row_reviewed)
         self.mark_issue_reviewed_button.clicked.connect(self.mark_selected_issue_reviewed)
@@ -210,6 +234,10 @@ class MainWindow(QMainWindow):
         if folder:
             self.set_source_path(Path(folder))
             self.analyze_current_source()
+
+    def apply_model_to_selected_row(self) -> None:
+        if self.table_model.apply_model_to_row(self.table_view.currentIndex().row()):
+            self._after_warning_resolution()
 
     def _issue_lines(self) -> list[str]:
         product_warnings = self._product_warning_issues()
@@ -317,9 +345,15 @@ class MainWindow(QMainWindow):
         )
 
 
-def analyze_source(source: Path) -> dict[str, Any]:
+def analyze_source(
+    source: Path,
+    provider: MetadataSuggestionProvider | None = None,
+) -> dict[str, Any]:
     scan = scan_source(source)
     inventory = classify_inventory(scan)
     inference = infer_metadata(scan, inventory)
-    contract = build_review_contract(scan, inventory, inference)
+    model_result = None
+    if provider is not None:
+        model_result = request_model_suggestions(provider, build_model_packet(inference))
+    contract = build_review_contract(scan, inventory, inference, model_result)
     return contract_to_dict(contract)

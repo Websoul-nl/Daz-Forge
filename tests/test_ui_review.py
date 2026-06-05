@@ -54,6 +54,83 @@ def review_payload(path: Path) -> dict:
     return contract_to_dict(build_review_contract(scan, inventory, inference))
 
 
+def manual_payload() -> dict:
+    return {
+        "product": {
+            "product_type": "clothing/outfit",
+            "primary_artist": "Websoul",
+            "artists": ["Websoul"],
+            "smart_content_count": 2,
+            "total_files": 10,
+            "model_provider": "off",
+        },
+        "warnings": [{"code": "inference-warning", "message": "Dress.duf: support-category-conflict"}],
+        "hard_blockers": [],
+        "rows": [
+            {
+                "path": "People/Genesis 9/Clothing/Websoul/Dress.duf",
+                "final": {
+                    "content_type": "Follower/Wardrobe",
+                    "categories": ["/Default/Wardrobe"],
+                    "compatibility_base": "",
+                    "compatibilities": ["/Genesis 9/Base"],
+                    "editable": True,
+                },
+                "deterministic": {
+                    "content_type": "Follower/Wardrobe",
+                    "categories": ["/Default/Wardrobe"],
+                    "compatibility_base": "",
+                    "compatibilities": ["/Genesis 9/Base"],
+                    "confidence": 0.8,
+                    "reason": "deterministic analyzer",
+                },
+                "model": {
+                    "content_type": "Follower/Wardrobe",
+                    "categories": ["/Default/Wardrobe/Dresses"],
+                    "compatibility_base": "",
+                    "compatibilities": ["/Genesis 9/Base"],
+                    "confidence": 0.9,
+                    "reason": "Model likes dresses.",
+                },
+                "support": {
+                    "content_type": "Follower/Wardrobe",
+                    "categories": ["/Default/Wardrobe"],
+                    "compatibility_base": "",
+                    "compatibilities": ["/Genesis 9/Base"],
+                    "confidence": 1.0,
+                    "reason": "existing support file",
+                },
+                "warnings": ["support-category-conflict"],
+                "author": "Websoul",
+                "asset_type": "wearable",
+            },
+            {
+                "path": "People/Genesis 9/Clothing/Websoul/Materials/Dress Red.duf",
+                "final": {
+                    "content_type": "Preset/Materials",
+                    "categories": ["/Default/Materials"],
+                    "compatibility_base": "",
+                    "compatibilities": ["/Genesis 9/Base"],
+                    "editable": True,
+                },
+                "deterministic": {
+                    "content_type": "Preset/Materials",
+                    "categories": ["/Default/Materials"],
+                    "compatibility_base": "",
+                    "compatibilities": ["/Genesis 9/Base"],
+                    "confidence": 0.8,
+                    "reason": "deterministic analyzer",
+                },
+                "model": None,
+                "support": None,
+                "warnings": [],
+                "author": "Websoul",
+                "asset_type": "preset_material",
+            },
+        ],
+    }
+
+
 def test_table_model_exposes_review_rows_and_headers(tmp_path: Path) -> None:
     write_file(tmp_path / "People" / "Genesis 9" / "Hair" / "Websoul" / "Hero Hair.duf", dson("wearable"))
 
@@ -81,6 +158,33 @@ def test_table_model_edits_final_fields(tmp_path: Path) -> None:
     assert approved[0]["final"]["content_type"] == "Follower/Hair"
 
 
+def test_table_model_filters_by_text_and_warnings_only() -> None:
+    model = ReviewTableModel(manual_payload())
+
+    model.set_filter_text("red")
+
+    assert model.rowCount() == 1
+    assert "Dress Red.duf" in model.data(model.index(0, model.column_index("File")), Qt.ItemDataRole.DisplayRole)
+
+    model.set_filter_text("")
+    model.set_warnings_only(True)
+
+    assert model.rowCount() == 1
+    assert "Dress.duf" in model.data(model.index(0, model.column_index("File")), Qt.ItemDataRole.DisplayRole)
+
+
+def test_table_model_formats_selected_row_details() -> None:
+    model = ReviewTableModel(manual_payload())
+
+    details = model.row_details(0)
+
+    assert "People/Genesis 9/Clothing/Websoul/Dress.duf" in details
+    assert "Final" in details
+    assert "Deterministic" in details
+    assert "Model" in details
+    assert "support-category-conflict" in details
+
+
 def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
 
@@ -92,3 +196,20 @@ def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) 
     assert window.table_model.rowCount() == 1
     assert "Scripts/Websoul/Tool.dsa" in window.current_contract["rows"][0]["path"]
     assert "Hard blockers: 0" in window.issue_text()
+
+
+def test_main_window_filter_controls_and_details_panel(qapp) -> None:
+    window = MainWindow()
+    window.set_contract(manual_payload())
+
+    window.filter_edit.setText("red")
+
+    assert window.table_model.rowCount() == 1
+    assert "Showing: 1 / 2" in window.summary_text()
+
+    window.filter_edit.setText("")
+    window.warnings_only_checkbox.setChecked(True)
+    window.show_row_details(0)
+
+    assert window.table_model.rowCount() == 1
+    assert "support-category-conflict" in window.detail_text()

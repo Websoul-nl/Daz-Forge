@@ -1,0 +1,5 @@
+.codex-local/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

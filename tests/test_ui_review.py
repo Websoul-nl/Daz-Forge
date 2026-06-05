@@ -185,6 +185,28 @@ def test_table_model_formats_selected_row_details() -> None:
     assert "support-category-conflict" in details
 
 
+def test_table_model_can_apply_support_or_mark_row_reviewed() -> None:
+    model = ReviewTableModel(manual_payload())
+
+    assert model.apply_support_to_row(0)
+
+    approved = model.approved_rows()
+    assert approved[0]["final"]["categories"] == ["/Default/Wardrobe"]
+    assert approved[0]["warnings"] == []
+
+    model.set_warnings_only(True)
+    assert model.rowCount() == 0
+
+    model.set_warnings_only(False)
+    model.setData(model.index(0, model.column_index("Category")), "/Default/Wardrobe/Dresses", Qt.ItemDataRole.EditRole)
+    approved = model.approved_rows()
+    approved[0]["warnings"] = ["support-category-conflict"]
+    model.set_contract({**manual_payload(), "rows": approved})
+
+    assert model.mark_row_reviewed(0)
+    assert model.approved_rows()[0]["warnings"] == []
+
+
 def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
 
@@ -213,3 +235,23 @@ def test_main_window_filter_controls_and_details_panel(qapp) -> None:
 
     assert window.table_model.rowCount() == 1
     assert "support-category-conflict" in window.detail_text()
+
+
+def test_main_window_warning_resolution_buttons(qapp) -> None:
+    window = MainWindow()
+    window.set_contract(manual_payload())
+    window.warnings_only_checkbox.setChecked(True)
+    window.table_view.selectRow(0)
+
+    window.mark_selected_row_reviewed()
+
+    assert window.table_model.rowCount() == 0
+    assert "Dress.duf: support-category-conflict" not in window.issue_text()
+    assert "product" not in window.issue_text()
+
+    window = MainWindow()
+    window.set_contract(manual_payload())
+    window.issue_list.setCurrentRow(2)
+    window.mark_selected_issue_reviewed()
+
+    assert "Dress.duf: support-category-conflict" not in window.issue_text()

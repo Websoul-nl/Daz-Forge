@@ -140,6 +140,37 @@ class ReviewTableModel(QAbstractTableModel):
             sections.extend(["Warnings", _join_values(warnings)])
         return "\n".join(section for section in sections if section is not None)
 
+    def apply_support_to_row(self, visible_row: int) -> bool:
+        if visible_row < 0 or visible_row >= len(self._visible_row_indexes):
+            return False
+        row = self._visible_row(visible_row)
+        support = row.get("support")
+        if not support:
+            return False
+        final = row.setdefault("final", {})
+        for key in ("content_type", "categories", "compatibility_base", "compatibilities"):
+            final[key] = deepcopy(support.get(key, [] if key in {"categories", "compatibilities"} else ""))
+        row["warnings"] = []
+        self._refresh_visible_rows()
+        self.layoutChanged.emit()
+        return True
+
+    def mark_row_reviewed(self, visible_row: int) -> bool:
+        if visible_row < 0 or visible_row >= len(self._visible_row_indexes):
+            return False
+        row = self._visible_row(visible_row)
+        row["warnings"] = []
+        self._refresh_visible_rows()
+        self.layoutChanged.emit()
+        return True
+
+    def row_warning_messages(self) -> list[str]:
+        messages: list[str] = []
+        for row in self._rows:
+            for warning in row.get("warnings", []):
+                messages.append(f"{row.get('path', '')}: {warning}")
+        return messages
+
     @property
     def _rows(self) -> list[dict[str, Any]]:
         return self._contract.setdefault("rows", [])

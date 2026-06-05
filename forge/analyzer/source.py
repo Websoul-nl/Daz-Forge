@@ -70,6 +70,16 @@ def scan_source(path: Path) -> SourceScan:
     raise SourceScanError(f"Source must be a folder or zip file: {source}")
 
 
+
+
+def read_source_file(scan: SourceScan, source_file: SourceFile) -> bytes:
+    if scan.source_kind == "folder":
+        return (Path(scan.source_path) / source_file.source_path).read_bytes()
+    if scan.source_kind == "zip":
+        with ZipFile(scan.source_path) as archive:
+            return archive.read(source_file.source_path)
+    raise SourceScanError(f"Unknown source kind: {scan.source_kind}")
+
 def _scan_folder(path: Path) -> SourceScan:
     names = sorted(
         _path_to_posix(file.relative_to(path))

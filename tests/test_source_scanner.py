@@ -78,6 +78,29 @@ def test_scan_zip_detects_content_root_without_extracting(tmp_path: Path) -> Non
     ]
 
 
+def test_scan_folder_with_single_zip_wrapper_scans_embedded_zip(tmp_path: Path) -> None:
+    write_file(tmp_path / "Install instructions.txt")
+    zip_path = tmp_path / "Product.zip"
+    write_zip(
+        zip_path,
+        [
+            "Content/People/Genesis 9/Characters/Hero.duf",
+            "Content/Runtime/Support/WEBS_1_Hero.dsx",
+        ],
+    )
+
+    scan = scan_source(tmp_path)
+
+    assert scan.source_kind == "zip"
+    assert scan.source_path == str(zip_path)
+    assert scan.content_root == "Content"
+    assert scan.warnings == ("folder-wrapper-single-zip",)
+    assert [file.content_path for file in scan.files] == [
+        "People/Genesis 9/Characters/Hero.duf",
+        "Runtime/Support/WEBS_1_Hero.dsx",
+    ]
+
+
 @pytest.mark.parametrize(
     "bad_name",
     [

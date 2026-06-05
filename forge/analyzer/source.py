@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
@@ -86,7 +86,14 @@ def _scan_folder(path: Path) -> SourceScan:
         for file in path.rglob("*")
         if file.is_file()
     )
-    return _build_scan("folder", str(path), names)
+    try:
+        return _build_scan("folder", str(path), names)
+    except SourceScanError:
+        zip_names = [name for name in names if PurePosixPath(name).suffix.lower() == ".zip"]
+        if len(zip_names) == 1:
+            scan = _scan_zip(path / zip_names[0])
+            return replace(scan, warnings=scan.warnings + ("folder-wrapper-single-zip",))
+        raise
 
 
 def _scan_zip(path: Path) -> SourceScan:

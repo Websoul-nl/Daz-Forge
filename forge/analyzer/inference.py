@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+import re
 
 from forge.analyzer.dson import DsonAssetInfo, DsonParseError, parse_dson_asset_info
 from forge.analyzer.inventory import InventoryItem, InventoryResult
@@ -17,6 +18,7 @@ CONTENT_TYPE_BY_DSON_TYPE = {
     "preset_hierarchical_material": "Preset/Materials",
     "preset_material": "Preset/Materials",
     "preset_layered_image": "Preset/Materials",
+    "preset_shape": "Preset/Morph",
     "preset_properties": "Preset/Properties",
     "preset_pose": "Preset/Pose",
     "preset_hierarchical_pose": "Preset/Pose",
@@ -76,7 +78,10 @@ def _infer_asset(
 ) -> AssetSuggestion:
     dson_info = _parse_dson_for_item(scan, item, source_file)
     content_type = _infer_content_type(item, dson_info)
+    support_content_types = {hint.content_type for hint in support_hints if hint.content_type}
+    content_type = _adjust_content_type_with_support(item, content_type, support_content_types)
     categories = _infer_categories(item.content_path, content_type)
+    compatibilities = _infer_compatibilities(item.content_path)
     author = dson_info.contributor.author if dson_info is not None else ""
     asset_type = dson_info.asset_type if dson_info is not None else ""
     warnings = list(item.warnings)
@@ -90,7 +95,6 @@ def _infer_asset(
         warnings.append("dson-parse-failed")
         confidence = min(confidence, 0.4)
 
-    support_content_types = {hint.content_type for hint in support_hints if hint.content_type}
     support_categories = {category for hint in support_hints for category in hint.categories}
 
     if support_content_types:
@@ -111,6 +115,7 @@ def _infer_asset(
         path=item.content_path,
         content_type=content_type,
         categories=categories,
+        compatibilities=compatibilities,
         asset_type=asset_type,
         author=author,
         confidence=confidence,
@@ -140,10 +145,24 @@ def _infer_content_type(item: InventoryItem, dson_info: DsonAssetInfo | None) ->
     return CONTENT_TYPE_BY_DSON_TYPE.get(dson_info.asset_type, "")
 
 
+def _adjust_content_type_with_support(
+    item: InventoryItem,
+    content_type: str,
+    support_content_types: set[str],
+) -> str:
+    parts = tuple(part.lower() for part in PurePosixPath(item.content_path).parts)
+    if content_type == "Set" and parts and parts[0] == "props":
+        if any(_metadata_family(support_type) == "prop" for support_type in support_content_types):
+            return "Prop"
+    return content_type
+
+
 def _infer_categories(content_path: str, content_type: str) -> tuple[str, ...]:
     parts = tuple(part.lower() for part in PurePosixPath(content_path).parts)
     joined = "/".join(parts)
 
+    if content_type.startswith("Script/"):
+        return ("/Default/Utilities/Scripts",)
     if parts and parts[0] == "vehicles":
         return ("/Default/Transportation/Land",)
     if parts and parts[0] == "scripts":
@@ -152,20 +171,20 @@ def _infer_categories(content_path: str, content_type: str) -> tuple[str, ...]:
         return ("/Default/Materials",)
     if "poses" in parts or content_type == "Preset/Pose":
         return ("/Default/Poses",)
+    if "shaping" in parts or content_type == "Preset/Morph":
+        return ("/Default/Shaping",)
     if "hair" in parts or content_type == "Follower/Hair":
         return ("/Default/Hair",)
     if "characters" in parts or content_type == "Actor/Character":
         return ("/Default/Figures/People",)
-    if "clothing" in parts or "wardrobe" in joined or content_type == "Follower/Wardrobe":
-        return ("/Default/Wardrobe",)
     if "accessories" in parts or content_type == "Follower/Accessory":
         return ("/Default/Accessories",)
     if parts and parts[0] in {"props", "figures"}:
         return ("/Default/Props",)
+    if "clothing" in parts or "wardrobe" in joined or content_type == "Follower/Wardrobe":
+        return ("/Default/Wardrobe",)
     if parts and parts[0] in {"environments", "scenes"}:
         return ("/Default/Environments",)
-    if content_type.startswith("Script/"):
-        return ("/Default/Utilities/Scripts",)
     return ()
 
 
@@ -173,13 +192,43 @@ def _infer_categories(content_path: str, content_type: str) -> tuple[str, ...]:
 def _metadata_family_agrees(left: str, right: str) -> bool:
     if not left or not right:
         return False
-    left_clean = left.rstrip("/").lower()
-    right_clean = right.rstrip("/").lower()
+    left_clean = _metadata_family(left)
+    right_clean = _metadata_family(right)
     return (
         left_clean == right_clean
         or left_clean.startswith(f"{right_clean}/")
         or right_clean.startswith(f"{left_clean}/")
     )
+
+
+def _metadata_family(value: str) -> str:
+    clean = value.rstrip("/").lower()
+    if clean.startswith("follower/"):
+        return "follower"
+    if clean.startswith("preset/layered-image"):
+        return "preset/materials"
+    if clean.startswith("preset/material"):
+        return "preset/materials"
+    if clean.startswith("preset/morph"):
+        return "preset/morph"
+    if clean.startswith("script/"):
+        return "script"
+    return clean
+
+
+def _infer_compatibilities(content_path: str) -> tuple[str, ...]:
+    compact = re.sub(r"[^a-z0-9]+", "", content_path.lower())
+    if "g3f" in compact or "genesis3female" in compact:
+        return ("/Genesis 3/Female",)
+    if "g3m" in compact or "genesis3male" in compact:
+        return ("/Genesis 3/Male",)
+    if "g8f" in compact or "genesis8female" in compact:
+        return ("/Genesis 8/Female", "/Genesis 8.1/Female")
+    if "g8m" in compact or "genesis8male" in compact:
+        return ("/Genesis 8/Male", "/Genesis 8.1/Male")
+    if "g9" in compact or "genesis9" in compact:
+        return ("/Genesis 9/Base",)
+    return ()
 
 def _infer_product(assets: tuple[AssetSuggestion, ...]) -> ProductSuggestion:
     content_counts = Counter(asset.content_type for asset in assets)

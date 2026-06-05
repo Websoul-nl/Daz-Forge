@@ -202,3 +202,173 @@ def test_hair_materials_keep_material_category(tmp_path: Path) -> None:
     asset = result.assets[0]
     assert asset.content_type == "Preset/Materials"
     assert asset.categories == ("/Default/Materials",)
+
+
+def test_preset_shape_infers_shaping_metadata_and_agrees_with_support(tmp_path: Path) -> None:
+    write_file(
+        tmp_path / "People" / "Genesis 9" / "Characters" / "Websoul" / "Hero" / "Shaping" / "Hero Body Apply.duf",
+        dson("preset_shape"),
+    )
+    write_file(
+        tmp_path / "Runtime" / "Support" / "WEBS_1_Hero.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products>
+            <Product VALUE="Hero">
+              <Assets>
+                <Asset VALUE="/People/Genesis 9/Characters/Websoul/Hero/Shaping/Hero Body Apply.duf">
+                  <ContentType VALUE="Preset/Morph/Apply/Body"/>
+                  <Categories><Category VALUE="/Default/Shaping/Apply/Body"/></Categories>
+                </Asset>
+              </Assets>
+            </Product>
+          </Products>
+        </ContentDBInstall>
+        """,
+    )
+
+    result = analyze(tmp_path)
+
+    asset = result.assets[0]
+    assert asset.content_type == "Preset/Morph"
+    assert asset.categories == ("/Default/Shaping",)
+    assert "unknown-content-type" not in asset.warnings
+    assert "support-content-type-conflict" not in asset.warnings
+    assert "support-category-conflict" not in asset.warnings
+
+
+def test_layered_image_support_agrees_with_material_family(tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Pan flute" / "Decoration" / "Autumn.duf", dson("preset_layered_image"))
+    write_file(
+        tmp_path / "Runtime" / "Support" / "WEBS_1_Pan_Flute.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products>
+            <Product VALUE="Pan Flute">
+              <Assets>
+                <Asset VALUE="/Props/Pan flute/Decoration/Autumn.duf">
+                  <ContentType VALUE="Preset/Layered-Image"/>
+                  <Categories><Category VALUE="/Default/Materials/Iray/Props"/></Categories>
+                </Asset>
+              </Assets>
+            </Product>
+          </Products>
+        </ContentDBInstall>
+        """,
+    )
+
+    result = analyze(tmp_path)
+
+    asset = result.assets[0]
+    assert asset.content_type == "Preset/Materials"
+    assert "support-content-type-conflict" not in asset.warnings
+    assert "support-category-conflict" not in asset.warnings
+
+
+def test_script_categories_win_over_incidental_folder_roots(tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Musical" / "Pan flute" / "Setup" / "Setup Smart Content.dsa", "// script")
+
+    result = analyze(tmp_path)
+
+    asset = result.assets[0]
+    assert asset.content_type == "Script/Utility"
+    assert asset.categories == ("/Default/Utilities/Scripts",)
+
+
+def test_prop_wearables_keep_prop_category_and_follower_support_agrees(tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Musical" / "Pan flute" / "Pan flute G9 Left Hand.duf", dson("wearable"))
+    write_file(
+        tmp_path / "Runtime" / "Support" / "WEBS_1_Pan_Flute.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products>
+            <Product VALUE="Pan Flute">
+              <Assets>
+                <Asset VALUE="/Props/Musical/Pan flute/Pan flute G9 Left Hand.duf">
+                  <ContentType VALUE="Follower/Attachment/Upper-Body/Arm/Left/Hand"/>
+                  <Categories><Category VALUE="/Default/Props/Musical"/></Categories>
+                </Asset>
+              </Assets>
+            </Product>
+          </Products>
+        </ContentDBInstall>
+        """,
+    )
+
+    result = analyze(tmp_path)
+
+    asset = result.assets[0]
+    assert asset.content_type == "Follower/Wardrobe"
+    assert asset.categories == ("/Default/Props",)
+    assert "support-content-type-conflict" not in asset.warnings
+    assert "support-category-conflict" not in asset.warnings
+
+
+def test_generation_tokens_infer_compatibilities(tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Musical" / "Pan flute" / "Pan flute G8F Left Hand.duf", dson("wearable"))
+    write_file(tmp_path / "Props" / "Musical" / "Pan flute" / "Poses" / "G9" / "G9 Sitting.duf", dson("preset_pose"))
+
+    result = analyze(tmp_path)
+    by_path = {asset.path: asset for asset in result.assets}
+
+    assert by_path["Props/Musical/Pan flute/Pan flute G8F Left Hand.duf"].compatibilities == (
+        "/Genesis 8/Female",
+        "/Genesis 8.1/Female",
+    )
+    assert by_path["Props/Musical/Pan flute/Poses/G9/G9 Sitting.duf"].compatibilities == ("/Genesis 9/Base",)
+
+
+def test_scene_subset_under_props_infers_prop_and_agrees_with_prop_support(tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Musical" / "Pan flute" / "Pan flute.duf", dson("scene_subset"))
+    write_file(
+        tmp_path / "Runtime" / "Support" / "WEBS_1_Pan_Flute.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products>
+            <Product VALUE="Pan Flute">
+              <Assets>
+                <Asset VALUE="/Props/Musical/Pan flute/Pan flute.duf">
+                  <ContentType VALUE="Prop"/>
+                  <Categories><Category VALUE="/Default/Props/Musical"/></Categories>
+                </Asset>
+              </Assets>
+            </Product>
+          </Products>
+        </ContentDBInstall>
+        """,
+    )
+
+    result = analyze(tmp_path)
+
+    asset = result.assets[0]
+    assert asset.content_type == "Prop"
+    assert asset.categories == ("/Default/Props",)
+    assert "support-content-type-conflict" not in asset.warnings
+
+
+def test_scene_subset_under_props_can_remain_set_when_support_says_set(tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Websoul" / "Deck" / "Deck Scene.duf", dson("scene_subset"))
+    write_file(
+        tmp_path / "Runtime" / "Support" / "WEBS_1_Deck.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products>
+            <Product VALUE="Deck">
+              <Assets>
+                <Asset VALUE="/Props/Websoul/Deck/Deck Scene.duf">
+                  <ContentType VALUE="Set"/>
+                  <Categories><Category VALUE="/Default/Props/Architecture"/></Categories>
+                </Asset>
+              </Assets>
+            </Product>
+          </Products>
+        </ContentDBInstall>
+        """,
+    )
+
+    result = analyze(tmp_path)
+
+    asset = result.assets[0]
+    assert asset.content_type == "Set"
+    assert asset.categories == ("/Default/Props",)
+    assert "support-content-type-conflict" not in asset.warnings

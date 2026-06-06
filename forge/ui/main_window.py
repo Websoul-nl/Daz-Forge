@@ -32,6 +32,7 @@ from forge.analyzer.model_provider import (
 )
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
+from forge.ui.delegates import CONTENT_TYPE_OPTIONS, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -63,6 +64,8 @@ class MainWindow(QMainWindow):
         self.model_name_edit.setPlaceholderText("LM Studio model")
         self.model_name_edit.setMinimumWidth(220)
         self.use_model_button = QPushButton("Use Model")
+        self.model_name_edit.setEnabled(False)
+        self.use_model_button.setEnabled(False)
         self.use_support_button = QPushButton("Use Support")
         self.mark_row_reviewed_button = QPushButton("Mark Row Reviewed")
         self.mark_issue_reviewed_button = QPushButton("Mark Issue Reviewed")
@@ -74,6 +77,10 @@ class MainWindow(QMainWindow):
         self.reviewed_issue_messages: set[str] = set()
         self.table_view = QTableView()
         self.table_view.setModel(self.table_model)
+        self.table_view.setItemDelegateForColumn(
+            self.table_model.column_index("Content Type"),
+            SearchableComboDelegate(CONTENT_TYPE_OPTIONS, self.table_view),
+        )
         self.table_view.setAlternatingRowColors(True)
         self.table_view.setSortingEnabled(False)
         self.table_view.setWordWrap(False)
@@ -179,23 +186,30 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.summary_label)
 
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        review_splitter = QSplitter(Qt.Orientation.Horizontal)
+        grid_container = QWidget()
+        grid_layout = QVBoxLayout(grid_container)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
+        grid_layout.setSpacing(8)
         filter_bar = QHBoxLayout()
         filter_bar.addWidget(self.filter_edit, 1)
         filter_bar.addWidget(self.warnings_only_checkbox)
-        filter_bar.addWidget(self.ask_model_checkbox)
-        filter_bar.addWidget(self.model_name_edit)
-        layout.addLayout(filter_bar)
+        grid_layout.addLayout(filter_bar)
+        grid_layout.addWidget(self.table_view, 1)
+        review_splitter.addWidget(grid_container)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        review_splitter = QSplitter(Qt.Orientation.Horizontal)
-        review_splitter.addWidget(self.table_view)
         self.detail_view.setMinimumWidth(340)
         detail_container = QWidget()
         detail_layout = QVBoxLayout(detail_container)
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(8)
+        model_bar = QHBoxLayout()
+        model_bar.addWidget(self.ask_model_checkbox)
+        model_bar.addWidget(self.model_name_edit, 1)
+        model_bar.addWidget(self.use_model_button)
+        detail_layout.addLayout(model_bar)
         action_bar = QHBoxLayout()
-        action_bar.addWidget(self.use_model_button)
         action_bar.addWidget(self.use_support_button)
         action_bar.addWidget(self.mark_row_reviewed_button)
         detail_layout.addLayout(action_bar)
@@ -221,6 +235,7 @@ class MainWindow(QMainWindow):
         self.source_edit.returnPressed.connect(self.analyze_current_source)
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.warnings_only_checkbox.toggled.connect(self._apply_filter)
+        self.ask_model_checkbox.toggled.connect(self._update_model_controls)
         self.use_model_button.clicked.connect(self.apply_model_to_selected_row)
         self.use_support_button.clicked.connect(self.apply_support_to_selected_row)
         self.mark_row_reviewed_button.clicked.connect(self.mark_selected_row_reviewed)
@@ -272,6 +287,10 @@ class MainWindow(QMainWindow):
         self.show_row_details(0 if self.table_model.rowCount() else -1)
         self._set_issue_lines(self._issue_lines())
         self.table_view.resizeColumnsToContents()
+
+    def _update_model_controls(self, enabled: bool) -> None:
+        self.model_name_edit.setEnabled(enabled)
+        self.use_model_button.setEnabled(enabled)
 
     def _after_warning_resolution(self) -> None:
         self.summary_label.setText(self.summary_text())

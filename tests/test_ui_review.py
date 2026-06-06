@@ -14,6 +14,7 @@ from forge.analyzer.review_contract import build_review_contract, contract_to_di
 from forge.analyzer.source import scan_source
 from forge.ui.main_window import MainWindow
 from forge.ui.main_window import analyze_source
+from forge.ui.delegates import SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -299,6 +300,27 @@ def test_main_window_can_use_configured_model_provider(qapp, tmp_path: Path) -> 
 
     assert window.current_contract["product"]["model_provider"] == "fake-model"
     assert window.current_contract["rows"][0]["model"]["reason"] == "Script path is a utility."
+
+
+def test_lm_studio_controls_are_disabled_until_enabled(qapp) -> None:
+    window = MainWindow()
+
+    assert window.model_name_edit.isEnabled() is False
+    assert window.use_model_button.isEnabled() is False
+
+    window.ask_model_checkbox.setChecked(True)
+
+    assert window.model_name_edit.isEnabled() is True
+    assert window.use_model_button.isEnabled() is True
+
+
+def test_content_type_column_uses_searchable_picker(qapp) -> None:
+    window = MainWindow()
+    delegate = window.table_view.itemDelegateForColumn(window.table_model.column_index("Content Type"))
+
+    assert isinstance(delegate, SearchableComboDelegate)
+    assert "Follower/Accessory" in delegate.options
+    assert "Preset/Materials" in delegate.options
 
     window = MainWindow()
     window.set_contract(manual_payload())

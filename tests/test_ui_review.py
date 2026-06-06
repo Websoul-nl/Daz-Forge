@@ -251,7 +251,7 @@ def test_analyze_source_can_include_model_suggestions(tmp_path: Path) -> None:
 def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
 
-    window = MainWindow()
+    window = MainWindow(run_analysis_synchronously=True)
     window.set_source_path(tmp_path)
     window.analyze_current_source()
 
@@ -259,6 +259,42 @@ def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) 
     assert window.table_model.rowCount() == 1
     assert "Scripts/Websoul/Tool.dsa" in window.current_contract["rows"][0]["path"]
     assert "Hard blockers: 0" in window.issue_text()
+
+
+def test_main_window_starts_analysis_without_blocking_ui(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    window = MainWindow()
+    started = {}
+
+    def fake_start(source, provider) -> None:
+        started["source"] = source
+        started["provider"] = provider
+
+    window._start_analysis = fake_start
+    window.set_source_path(tmp_path)
+
+    window.analyze_current_source()
+
+    assert started["source"] == tmp_path
+    assert started["provider"] is None
+
+
+def test_main_window_busy_state_disables_analysis_controls(qapp) -> None:
+    window = MainWindow()
+
+    window._set_analyzing(True)
+
+    assert window.analyze_button.isEnabled() is False
+    assert window.browse_button.isEnabled() is False
+    assert window.source_edit.isEnabled() is False
+    assert window.analyze_button.text() == "Analyzing..."
+
+    window._set_analyzing(False)
+
+    assert window.analyze_button.isEnabled() is True
+    assert window.browse_button.isEnabled() is True
+    assert window.source_edit.isEnabled() is True
+    assert window.analyze_button.text() == "Analyze"
 
 
 def test_main_window_filter_controls_and_details_panel(qapp) -> None:
@@ -292,7 +328,7 @@ def test_main_window_warning_resolution_buttons(qapp) -> None:
 
 def test_main_window_can_use_configured_model_provider(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
-    window = MainWindow(model_provider_factory=lambda model_name: StaticProvider())
+    window = MainWindow(model_provider_factory=lambda model_name: StaticProvider(), run_analysis_synchronously=True)
     window.set_source_path(tmp_path)
     window.ask_model_checkbox.setChecked(True)
 

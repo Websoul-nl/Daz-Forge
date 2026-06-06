@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -36,16 +36,38 @@ from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, Se
 from forge.ui.review_model import ReviewTableModel
 
 
+class AnalysisWorker(QObject):
+    finished = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, source: Path, provider: MetadataSuggestionProvider | None = None) -> None:
+        super().__init__()
+        self.source = source
+        self.provider = provider
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(analyze_source(self.source, provider=self.provider))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
         model_provider_factory: Callable[[str], MetadataSuggestionProvider] | None = None,
+        run_analysis_synchronously: bool = False,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Daz Forge")
         self.resize(1320, 780)
         self.setAcceptDrops(True)
 
+        self._analyzing = False
+        self.analysis_thread: QThread | None = None
+        self.analysis_worker: AnalysisWorker | None = None
+        self.run_analysis_synchronously = run_analysis_synchronously
         self.current_contract: dict[str, Any] = {"rows": [], "warnings": [], "hard_blockers": []}
         self.table_model = ReviewTableModel(self.current_contract)
         self.model_provider_factory = model_provider_factory or (
@@ -101,6 +123,8 @@ class MainWindow(QMainWindow):
         self.source_edit.setText(str(path))
 
     def analyze_current_source(self) -> None:
+        if self._analyzing:
+            return
         source_text = self.source_edit.text().strip()
         if not source_text:
             self._set_issue_lines(["No source selected."])
@@ -109,11 +133,14 @@ class MainWindow(QMainWindow):
             provider = None
             if self.ask_model_checkbox.isChecked():
                 provider = self.model_provider_factory(self.model_name_edit.text().strip())
-            contract = analyze_source(Path(source_text), provider=provider)
         except Exception as exc:
             self._set_issue_lines([f"Analysis failed: {exc}"])
             return
-        self.set_contract(contract)
+        source = Path(source_text)
+        if self.run_analysis_synchronously:
+            self._run_analysis_synchronously(source, provider)
+        else:
+            self._start_analysis(source, provider)
 
     def set_contract(self, contract: dict[str, Any]) -> None:
         self.current_contract = contract
@@ -295,8 +322,66 @@ class MainWindow(QMainWindow):
         self.table_view.resizeColumnsToContents()
 
     def _update_model_controls(self, enabled: bool) -> None:
-        self.model_name_edit.setEnabled(enabled)
-        self.use_model_button.setEnabled(enabled)
+        can_use_model = enabled and not self._analyzing
+        self.model_name_edit.setEnabled(can_use_model)
+        self.use_model_button.setEnabled(can_use_model)
+
+    def _run_analysis_synchronously(
+        self,
+        source: Path,
+        provider: MetadataSuggestionProvider | None,
+    ) -> None:
+        self._set_analyzing(True)
+        try:
+            contract = analyze_source(source, provider=provider)
+        except Exception as exc:
+            self._analysis_failed(str(exc))
+            return
+        self._analysis_finished(contract)
+
+    def _start_analysis(self, source: Path, provider: MetadataSuggestionProvider | None) -> None:
+        self._set_analyzing(True)
+        self.summary_label.setText("Analyzing...")
+        self._set_issue_lines(["Analyzing source..."])
+        thread = QThread(self)
+        worker = AnalysisWorker(source, provider=provider)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._analysis_finished)
+        worker.failed.connect(self._analysis_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(self._analysis_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+
+        self.analysis_thread = thread
+        self.analysis_worker = worker
+        thread.start()
+
+    def _analysis_finished(self, contract: dict[str, Any]) -> None:
+        self.set_contract(contract)
+        self._set_analyzing(False)
+
+    def _analysis_failed(self, message: str) -> None:
+        self.summary_label.setText("Analysis failed")
+        self._set_issue_lines([f"Analysis failed: {message}"])
+        self._set_analyzing(False)
+
+    def _analysis_thread_finished(self) -> None:
+        self.analysis_thread = None
+        self.analysis_worker = None
+
+    def _set_analyzing(self, analyzing: bool) -> None:
+        self._analyzing = analyzing
+        self.source_edit.setEnabled(not analyzing)
+        self.browse_button.setEnabled(not analyzing)
+        self.analyze_button.setEnabled(not analyzing)
+        self.ask_model_checkbox.setEnabled(not analyzing)
+        self.analyze_button.setText("Analyzing..." if analyzing else "Analyze")
+        self._update_model_controls(self.ask_model_checkbox.isChecked())
 
     def _after_warning_resolution(self) -> None:
         self.summary_label.setText(self.summary_text())

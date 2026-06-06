@@ -32,7 +32,7 @@ from forge.analyzer.model_provider import (
 )
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
-from forge.ui.delegates import CONTENT_TYPE_OPTIONS, SearchableComboDelegate
+from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -81,6 +81,12 @@ class MainWindow(QMainWindow):
             self.table_model.column_index("Content Type"),
             SearchableComboDelegate(CONTENT_TYPE_OPTIONS, self.table_view),
         )
+        compact_text_delegate = CompactLineEditDelegate(self.table_view)
+        for column_name in ("Category", "Compatibility Base", "Compatibilities"):
+            self.table_view.setItemDelegateForColumn(
+                self.table_model.column_index(column_name),
+                compact_text_delegate,
+            )
         self.table_view.setAlternatingRowColors(True)
         self.table_view.setSortingEnabled(False)
         self.table_view.setWordWrap(False)
@@ -326,6 +332,14 @@ class MainWindow(QMainWindow):
                 border: 1px solid #46484f;
                 border-radius: 6px;
                 padding: 8px 10px;
+                selection-background-color: #16c4a0;
+            }
+            QLineEdit[tableEditor="true"], QComboBox[tableEditor="true"] {
+                background: #2b2c30;
+                border: 1px solid #46484f;
+                border-radius: 3px;
+                padding: 0 4px;
+                min-height: 20px;
                 selection-background-color: #16c4a0;
             }
             QPushButton {

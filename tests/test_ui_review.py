@@ -14,7 +14,7 @@ from forge.analyzer.review_contract import build_review_contract, contract_to_di
 from forge.analyzer.source import scan_source
 from forge.ui.main_window import MainWindow
 from forge.ui.main_window import analyze_source
-from forge.ui.delegates import SearchableComboDelegate
+from forge.ui.delegates import CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -321,6 +321,14 @@ def test_content_type_column_uses_searchable_picker(qapp) -> None:
     assert isinstance(delegate, SearchableComboDelegate)
     assert "Follower/Accessory" in delegate.options
     assert "Preset/Materials" in delegate.options
+
+
+def test_editable_text_columns_use_compact_table_editor(qapp) -> None:
+    window = MainWindow()
+
+    for column_name in ("Category", "Compatibility Base", "Compatibilities"):
+        delegate = window.table_view.itemDelegateForColumn(window.table_model.column_index(column_name))
+        assert isinstance(delegate, CompactLineEditDelegate)
 
     window = MainWindow()
     window.set_contract(manual_payload())

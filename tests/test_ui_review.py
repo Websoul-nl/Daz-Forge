@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -334,7 +335,9 @@ def test_main_window_prefills_product_metadata_fields(qapp, tmp_path: Path) -> N
     assert window.store_code_edit.text() == "WEBS"
     assert window.token_edit.text() == "24156030"
     assert window.artists_edit.text() == "Websoul"
+    assert re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", window.guid_edit.text())
     assert window.current_contract["product"]["product_token"] == "24156030"
+    assert window.current_contract["product"]["global_id"] == window.guid_edit.text()
 
 
 def test_main_window_product_metadata_edits_update_contract(qapp) -> None:
@@ -345,6 +348,7 @@ def test_main_window_product_metadata_edits_update_contract(qapp) -> None:
     window.store_edit.setText("Renderosity")
     window.store_code_edit.setText("RND")
     window.token_edit.setText("12345678")
+    window.guid_edit.setText("bf8660f0-d6be-4171-abdd-19a3315e4170")
     window.artists_edit.setText("Sade; Websoul")
 
     product = window.current_contract["product"]
@@ -353,8 +357,52 @@ def test_main_window_product_metadata_edits_update_contract(qapp) -> None:
     assert product["store_id"] == "RND"
     assert product["store_code"] == "RND"
     assert product["product_token"] == "12345678"
+    assert product["global_id"] == "bf8660f0-d6be-4171-abdd-19a3315e4170"
     assert product["primary_artist"] == "Sade"
     assert product["artists"] == ["Sade", "Websoul"]
+
+
+def test_main_window_can_generate_new_product_guid(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+    window.set_contract(manual_payload())
+    old_guid = window.guid_edit.text()
+
+    window.generate_product_guid()
+
+    assert window.guid_edit.text() != old_guid
+    assert window.current_contract["product"]["global_id"] == window.guid_edit.text()
+
+
+def test_main_window_prefills_product_metadata_from_support_file(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Sadriel" / "Jewelry.duf", dson("scene_subset", author="Sadriel"))
+    write_file(
+        tmp_path / "Runtime" / "Support" / "LOCAL_USER_Celtic_Jewelry.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products>
+            <Product VALUE="Celtic Jewelry for Genesis 8 and 9">
+              <StoreID VALUE="LOCAL USER"/>
+              <GlobalID VALUE="bf8660f0-d6be-4171-abdd-19a3315e4170"/>
+              <ProductToken VALUE="884422"/>
+              <Artists>
+                <Artist VALUE="Sade"/>
+                <Artist VALUE="Sadriel"/>
+              </Artists>
+            </Product>
+          </Products>
+        </ContentDBInstall>
+        """,
+    )
+
+    window = MainWindow(run_analysis_synchronously=True)
+    window.set_source_path(tmp_path)
+    window.analyze_current_source()
+
+    assert window.product_name_edit.text() == "Celtic Jewelry for Genesis 8 and 9"
+    assert window.store_edit.text() == "LOCAL USER"
+    assert window.guid_edit.text() == "bf8660f0-d6be-4171-abdd-19a3315e4170"
+    assert window.token_edit.text() == "884422"
+    assert window.artists_edit.text() == "Sade; Sadriel"
 
 
 def test_main_window_status_bar_can_show_analysis_progress(qapp) -> None:

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 from typing import Any, Callable
+from uuid import uuid4
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
@@ -42,6 +43,7 @@ from forge.analyzer.model_provider import (
 )
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import SourceScan, scan_source
+from forge.packager.dim import build_dim_package
 from forge.settings import AppSettings
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
@@ -153,6 +155,9 @@ class MainWindow(QMainWindow):
         self.store_code_edit.setPlaceholderText("Store code")
         self.token_edit = QLineEdit()
         self.token_edit.setPlaceholderText("Token")
+        self.guid_edit = QLineEdit()
+        self.guid_edit.setPlaceholderText("GUID")
+        self.generate_guid_button = QPushButton("Generate")
         self.artists_edit = QLineEdit()
         self.artists_edit.setPlaceholderText("Artists")
         self.provider_combo = QComboBox()
@@ -162,6 +167,7 @@ class MainWindow(QMainWindow):
         self.model_name_edit.setPlaceholderText("Model")
         self.model_name_edit.setMinimumWidth(220)
         self.ask_model_button = QPushButton("Ask Model")
+        self.build_package_button = QPushButton("Build Package")
         self.use_support_button = QPushButton("Use Support")
         self.mark_row_reviewed_button = QPushButton("Mark Row Reviewed")
         self.mark_issue_reviewed_button = QPushButton("Mark Issue Reviewed")
@@ -298,6 +304,9 @@ class MainWindow(QMainWindow):
         product_bar.addWidget(self.store_code_edit)
         product_bar.addWidget(QLabel("Token"))
         product_bar.addWidget(self.token_edit)
+        product_bar.addWidget(QLabel("GUID"))
+        product_bar.addWidget(self.guid_edit, 2)
+        product_bar.addWidget(self.generate_guid_button)
         product_bar.addWidget(QLabel("Artists"))
         product_bar.addWidget(self.artists_edit, 2)
         layout.addLayout(product_bar)
@@ -326,6 +335,7 @@ class MainWindow(QMainWindow):
         model_bar.addWidget(self.ask_model_button)
         detail_layout.addLayout(model_bar)
         action_bar = QHBoxLayout()
+        action_bar.addWidget(self.build_package_button)
         action_bar.addWidget(self.use_support_button)
         action_bar.addWidget(self.mark_row_reviewed_button)
         detail_layout.addLayout(action_bar)
@@ -353,13 +363,16 @@ class MainWindow(QMainWindow):
             self.store_edit,
             self.store_code_edit,
             self.token_edit,
+            self.guid_edit,
             self.artists_edit,
         ):
             product_field.textChanged.connect(self._product_metadata_changed)
+        self.generate_guid_button.clicked.connect(self.generate_product_guid)
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.warnings_only_checkbox.toggled.connect(self._apply_filter)
         self.provider_combo.currentTextChanged.connect(self._provider_changed)
         self.ask_model_button.clicked.connect(self.ask_model_for_current_source)
+        self.build_package_button.clicked.connect(self.build_current_package)
         self.use_support_button.clicked.connect(self.apply_support_to_selected_row)
         self.mark_row_reviewed_button.clicked.connect(self.mark_selected_row_reviewed)
         self.mark_issue_reviewed_button.clicked.connect(self.mark_selected_issue_reviewed)
@@ -376,6 +389,31 @@ class MainWindow(QMainWindow):
     def apply_model_to_selected_row(self) -> None:
         if self.table_model.apply_model_to_row(self.table_view.currentIndex().row()):
             self._after_warning_resolution()
+
+    def build_current_package(self) -> None:
+        if self._analyzing:
+            return
+        if self.current_contract.get("hard_blockers"):
+            self._set_issue_lines(self._issue_lines() + ["Package build blocked: resolve hard blockers first."])
+            return
+        source_text = self.source_edit.text().strip()
+        if not source_text:
+            self._set_issue_lines(["No source selected."])
+            return
+        try:
+            result = build_dim_package(
+                scan_source(Path(source_text)),
+                self.current_contract,
+                self._package_output_folder(Path(source_text)),
+            )
+        except Exception as exc:
+            self._set_issue_lines([f"Package build failed: {exc}"])
+            self._analysis_progress(f"Package build failed: {exc}")
+            return
+        self._analysis_progress(f"Package built: {result.zip_path}")
+
+    def generate_product_guid(self) -> None:
+        self.guid_edit.setText(str(uuid4()))
 
     def ask_model_for_current_source(self) -> None:
         if self._analyzing:
@@ -582,6 +620,7 @@ class MainWindow(QMainWindow):
         self.source_edit.setEnabled(not analyzing)
         self.browse_button.setEnabled(not analyzing)
         self.provider_combo.setEnabled(not analyzing)
+        self.build_package_button.setEnabled(not analyzing)
         self._update_model_controls()
 
     def _after_warning_resolution(self) -> None:
@@ -596,13 +635,15 @@ class MainWindow(QMainWindow):
         if not product.get("product_name"):
             product["product_name"] = Path(source_path).stem if source_path else ""
         if not product.get("store_display_name"):
-            product["store_display_name"] = self.app_settings.default_store.display_name
+            product["store_display_name"] = product.get("store_id") or self.app_settings.default_store.display_name
         if not product.get("store_id"):
             product["store_id"] = self.app_settings.default_store.store_id
         if not product.get("store_code"):
             product["store_code"] = self.app_settings.default_store.dim_prefix
         if not product.get("product_token"):
             product["product_token"] = str(self.app_settings.next_product_number)
+        if not product.get("global_id"):
+            product["global_id"] = str(uuid4())
         artists = [str(artist) for artist in product.get("artists", []) if str(artist)]
         primary_artist = str(product.get("primary_artist", ""))
         if not artists and primary_artist:
@@ -619,6 +660,7 @@ class MainWindow(QMainWindow):
             self.store_edit.setText(str(product.get("store_display_name", "")))
             self.store_code_edit.setText(str(product.get("store_code") or product.get("store_id", "")))
             self.token_edit.setText(str(product.get("product_token", "")))
+            self.guid_edit.setText(str(product.get("global_id", "")))
             self.artists_edit.setText("; ".join(str(artist) for artist in product.get("artists", []) if str(artist)))
         finally:
             self._syncing_product_fields = False
@@ -633,9 +675,16 @@ class MainWindow(QMainWindow):
         product["store_id"] = self.store_code_edit.text().strip()
         product["store_code"] = self.store_code_edit.text().strip()
         product["product_token"] = self.token_edit.text().strip()
+        product["global_id"] = self.guid_edit.text().strip()
         product["artists"] = artists
         product["primary_artist"] = artists[0] if artists else ""
         self.summary_label.setText(self.summary_text())
+
+    def _package_output_folder(self, source: Path) -> Path:
+        configured = self.app_settings.dim_downloads_folder or self.app_settings.default_output_folder
+        if configured:
+            return Path(configured)
+        return source.parent / "Daz Forge Packages"
 
     def _should_merge_model_contract(self, contract: dict[str, Any]) -> bool:
         product = contract.get("product", {})

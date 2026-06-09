@@ -33,6 +33,7 @@ class ProductReviewSummary:
     store_id: str = ""
     store_code: str = ""
     product_token: str = ""
+    global_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -124,15 +125,18 @@ def _build_product_summary(
     inference: InferenceResult,
     model_result: ModelSuggestionResult | None,
 ) -> ProductReviewSummary:
+    support_product = _support_product_metadata(scan)
+    artists = support_product.artists if support_product is not None and support_product.artists else inference.product.artists
+    primary_artist = artists[0] if artists else inference.product.primary_artist
     return ProductReviewSummary(
         source_path=scan.source_path,
         source_kind=scan.source_kind,
         content_root=scan.content_root,
-        product_name=_source_product_name(scan),
+        product_name=support_product.product_name if support_product is not None and support_product.product_name else _source_product_name(scan),
         product_type=inference.product.product_type,
-        primary_artist=inference.product.primary_artist,
+        primary_artist=primary_artist,
         artist_state=inference.product.artist_state,
-        artists=inference.product.artists,
+        artists=artists,
         total_files=len(scan.files),
         smart_content_count=len(inventory.smart_content),
         documentation_count=len(inventory.documentation),
@@ -140,12 +144,30 @@ def _build_product_summary(
         ignored_count=len(inventory.ignored),
         model_provider=model_result.provider if model_result is not None else "",
         model_available=model_result.available if model_result is not None else False,
+        store_id=support_product.store_id if support_product is not None else "",
+        store_code=support_product.store_id if support_product is not None else "",
+        product_token=support_product.product_token if support_product is not None else "",
+        global_id=support_product.global_id if support_product is not None else "",
     )
 
 
 def _source_product_name(scan: SourceScan) -> str:
     path = PurePosixPath(scan.source_path.replace("\\", "/"))
     return path.stem or path.name
+
+
+def _support_product_metadata(scan: SourceScan):
+    for source_file in scan.files:
+        path = PurePosixPath(source_file.content_path)
+        if len(path.parts) < 3 or path.parts[0].lower() != "runtime" or path.parts[1].lower() != "support":
+            continue
+        if path.suffix.lower() != ".dsx":
+            continue
+        try:
+            return parse_support_metadata(read_source_file(scan, source_file))
+        except SupportParseError:
+            continue
+    return None
 
 
 def _build_asset_row(

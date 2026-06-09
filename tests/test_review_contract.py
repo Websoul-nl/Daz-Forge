@@ -65,6 +65,37 @@ def test_product_summary_contains_source_counts_and_model_status(tmp_path: Path)
     assert contract.product.thumbnail_count == 1
 
 
+def test_product_summary_uses_existing_support_product_fields(tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Sadriel" / "Jewelry.duf", dson("scene_subset", author="Sadriel"))
+    write_file(
+        tmp_path / "Runtime" / "Support" / "LOCAL_USER_Celtic_Jewelry.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products>
+            <Product VALUE="Celtic Jewelry for Genesis 8 and 9">
+              <StoreID VALUE="LOCAL USER"/>
+              <GlobalID VALUE="bf8660f0-d6be-4171-abdd-19a3315e4170"/>
+              <ProductToken VALUE="884422"/>
+              <Artists>
+                <Artist VALUE="Sade"/>
+                <Artist VALUE="Sadriel"/>
+              </Artists>
+            </Product>
+          </Products>
+        </ContentDBInstall>
+        """,
+    )
+
+    contract = analyze(tmp_path)
+
+    assert contract.product.product_name == "Celtic Jewelry for Genesis 8 and 9"
+    assert contract.product.store_id == "LOCAL USER"
+    assert contract.product.global_id == "bf8660f0-d6be-4171-abdd-19a3315e4170"
+    assert contract.product.product_token == "884422"
+    assert contract.product.artists == ("Sade", "Sadriel")
+    assert contract.product.primary_artist == "Sade"
+
+
 def test_asset_rows_keep_deterministic_model_support_and_final_fields(tmp_path: Path) -> None:
     asset_path = "People/Genesis 9/Hair/Websoul/Hero Hair.duf"
     write_file(tmp_path / asset_path, dson("wearable"))

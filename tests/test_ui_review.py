@@ -13,7 +13,7 @@ from forge.analyzer.inventory import classify_inventory
 from forge.analyzer.model_provider import OllamaProvider
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
-from forge.ui.main_window import MainWindow
+from forge.ui.main_window import AnalysisWorker, MainWindow
 from forge.ui.main_window import analyze_source
 from forge.ui.delegates import CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
@@ -426,13 +426,49 @@ def test_model_provider_selector_hides_not_installed_providers(qapp) -> None:
     assert window.provider_combo.currentText() == "Ollama"
 
 
-def test_ollama_default_provider_has_short_timeout(qapp) -> None:
+def test_analysis_worker_emits_deterministic_contract_before_model_contract(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    worker = AnalysisWorker(tmp_path, provider=StaticProvider())
+    deterministic_payloads = []
+    final_payloads = []
+
+    worker.deterministic_finished.connect(deterministic_payloads.append)
+    worker.finished.connect(final_payloads.append)
+
+    worker.run()
+
+    assert len(deterministic_payloads) == 1
+    assert deterministic_payloads[0]["product"]["model_provider"] == ""
+    assert deterministic_payloads[0]["rows"][0]["model"] is None
+    assert len(final_payloads) == 1
+    assert final_payloads[0]["product"]["model_provider"] == "fake-model"
+    assert final_payloads[0]["rows"][0]["model"]["reason"] == "Script path is a utility."
+
+
+def test_main_window_merges_model_result_without_overwriting_user_edits(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    window = MainWindow(available_model_providers=())
+    deterministic_payload = analyze_source(tmp_path)
+    model_payload = analyze_source(tmp_path, provider=StaticProvider())
+
+    window.set_contract(deterministic_payload)
+    category_index = window.table_model.index(0, window.table_model.column_index("Category"))
+    assert window.table_model.setData(category_index, "/Default/Custom/Scripts", Qt.ItemDataRole.EditRole)
+
+    window._analysis_finished(model_payload)
+
+    assert window.table_model.approved_rows()[0]["final"]["categories"] == ["/Default/Custom/Scripts"]
+    assert window.table_model.approved_rows()[0]["model"]["categories"] == ["/Default/Utilities/Scripts"]
+    assert window.current_contract["product"]["model_provider"] == "fake-model"
+
+
+def test_ollama_default_provider_has_timeout_for_background_analysis(qapp) -> None:
     window = MainWindow(available_model_providers=("ollama",))
 
     provider = window._default_model_provider_factory("ollama", "qwen3:4b")
 
     assert isinstance(provider, OllamaProvider)
-    assert provider.timeout_seconds == 35
+    assert provider.timeout_seconds == 120
 
 
 def test_model_provider_selector_falls_back_to_off_when_none_installed(qapp) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 import shutil
 from typing import Any, Callable
@@ -25,22 +27,26 @@ from PySide6.QtWidgets import (
 )
 
 from forge.analyzer.inference import infer_metadata
+from forge.analyzer.inference import InferenceResult
 from forge.analyzer.inventory import classify_inventory
+from forge.analyzer.inventory import InventoryResult
 from forge.analyzer.model_provider import (
     LMStudioProvider,
     MetadataSuggestionProvider,
+    ModelSuggestionResult,
     OllamaProvider,
     build_model_packet,
     request_model_suggestions,
 )
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
-from forge.analyzer.source import scan_source
+from forge.analyzer.source import SourceScan, scan_source
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
 
 
 class AnalysisWorker(QObject):
     progress = Signal(str)
+    deterministic_finished = Signal(dict)
     finished = Signal(dict)
     failed = Signal(str)
 
@@ -52,9 +58,22 @@ class AnalysisWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            self.finished.emit(analyze_source(self.source, provider=self.provider, progress=self.progress.emit))
+            context = _analyze_source_context(self.source, progress=self.progress.emit)
+            if self.provider is None:
+                self.finished.emit(_build_analysis_payload(context, progress=self.progress.emit))
+                return
+            self.deterministic_finished.emit(_build_analysis_payload(context, progress=self.progress.emit))
+            model_result = _request_model_result(self.provider, context, progress=self.progress.emit)
+            self.finished.emit(_build_analysis_payload(context, model_result, progress=self.progress.emit))
         except Exception as exc:
             self.failed.emit(str(exc))
+
+
+@dataclass(frozen=True)
+class AnalysisContext:
+    scan: SourceScan
+    inventory: InventoryResult
+    inference: InferenceResult
 
 
 class MainWindow(QMainWindow):
@@ -395,7 +414,7 @@ class MainWindow(QMainWindow):
         model_name: str,
     ) -> MetadataSuggestionProvider:
         if provider_key == "ollama":
-            return OllamaProvider(model=model_name or "qwen3:4b", timeout_seconds=35)
+            return OllamaProvider(model=model_name or "qwen3:4b", timeout_seconds=120)
         if provider_key == "lm-studio":
             return LMStudioProvider(model=model_name or "qwen/qwen3-4b", timeout_seconds=120)
         raise ValueError(f"Unknown model provider: {provider_key}")
@@ -423,6 +442,7 @@ class MainWindow(QMainWindow):
 
         thread.started.connect(worker.run)
         worker.progress.connect(self._analysis_progress)
+        worker.deterministic_finished.connect(self._analysis_deterministic_finished)
         worker.finished.connect(self._analysis_finished)
         worker.failed.connect(self._analysis_failed)
         worker.finished.connect(thread.quit)
@@ -436,8 +456,14 @@ class MainWindow(QMainWindow):
         self.analysis_worker = worker
         thread.start()
 
-    def _analysis_finished(self, contract: dict[str, Any]) -> None:
+    def _analysis_deterministic_finished(self, contract: dict[str, Any]) -> None:
         self.set_contract(contract)
+
+    def _analysis_finished(self, contract: dict[str, Any]) -> None:
+        if self._should_merge_model_contract(contract):
+            self._merge_model_contract(contract)
+        else:
+            self.set_contract(contract)
         self._set_analyzing(False)
 
     def _analysis_failed(self, message: str) -> None:
@@ -467,6 +493,49 @@ class MainWindow(QMainWindow):
         self._set_issue_lines(self._issue_lines())
         self.show_row_details(0 if self.table_model.rowCount() else -1)
         self.table_view.resizeColumnsToContents()
+
+    def _should_merge_model_contract(self, contract: dict[str, Any]) -> bool:
+        product = contract.get("product", {})
+        current_product = self.current_contract.get("product", {})
+        return (
+            bool(product.get("model_provider"))
+            and bool(self.current_contract.get("rows"))
+            and current_product.get("source_path") == product.get("source_path")
+        )
+
+    def _merge_model_contract(self, model_contract: dict[str, Any]) -> None:
+        merged = deepcopy(self.current_contract)
+        current_rows = self.table_model.approved_rows()
+        model_rows_by_path = {
+            row.get("path", ""): row
+            for row in model_contract.get("rows", [])
+        }
+        for row in current_rows:
+            model_row = model_rows_by_path.get(row.get("path", ""))
+            if model_row is not None:
+                row["model"] = deepcopy(model_row.get("model"))
+        merged["rows"] = current_rows
+        merged["product"] = {
+            **merged.get("product", {}),
+            "model_provider": model_contract.get("product", {}).get("model_provider", ""),
+            "model_available": model_contract.get("product", {}).get("model_available", False),
+        }
+        current_warnings = [
+            warning for warning in merged.get("warnings", [])
+            if warning.get("code") != "model-warning"
+        ]
+        model_warnings = [
+            warning for warning in model_contract.get("warnings", [])
+            if warning.get("code") == "model-warning"
+        ]
+        merged["warnings"] = current_warnings + model_warnings
+
+        self.current_contract = merged
+        self.table_model.set_contract(merged)
+        self.summary_label.setText(self.summary_text())
+        self._set_issue_lines(self._issue_lines())
+        self.table_view.resizeColumnsToContents()
+        self.show_row_details(0 if self.table_model.rowCount() else -1)
 
     def _product_warning_issues(self) -> list[dict[str, str]]:
         row_warning_messages = set()
@@ -547,6 +616,17 @@ def analyze_source(
     provider: MetadataSuggestionProvider | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
+    context = _analyze_source_context(source, progress=progress)
+    model_result = None
+    if provider is not None:
+        model_result = _request_model_result(provider, context, progress=progress)
+    return _build_analysis_payload(context, model_result, progress=progress)
+
+
+def _analyze_source_context(
+    source: Path,
+    progress: Callable[[str], None] | None = None,
+) -> AnalysisContext:
     _report_progress(progress, "Scanning source...")
     scan = scan_source(source)
     total_files = len(scan.files)
@@ -556,15 +636,29 @@ def analyze_source(
     smart_content_count = len(inventory.smart_content)
     _report_progress(progress, f"Inferring metadata... {smart_content_count} / {smart_content_count}")
     inference = infer_metadata(scan, inventory)
-    model_result = None
-    if provider is not None:
-        _report_progress(
-            progress,
-            f"Asking {_provider_progress_label(provider)}... {smart_content_count} / {smart_content_count}",
-        )
-        model_result = request_model_suggestions(provider, build_model_packet(inference))
+    return AnalysisContext(scan=scan, inventory=inventory, inference=inference)
+
+
+def _request_model_result(
+    provider: MetadataSuggestionProvider,
+    context: AnalysisContext,
+    progress: Callable[[str], None] | None = None,
+) -> ModelSuggestionResult:
+    smart_content_count = len(context.inventory.smart_content)
+    _report_progress(
+        progress,
+        f"Asking {_provider_progress_label(provider)}... {smart_content_count} / {smart_content_count}",
+    )
+    return request_model_suggestions(provider, build_model_packet(context.inference))
+
+
+def _build_analysis_payload(
+    context: AnalysisContext,
+    model_result: ModelSuggestionResult | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     _report_progress(progress, "Building review grid...")
-    contract = build_review_contract(scan, inventory, inference, model_result)
+    contract = build_review_contract(context.scan, context.inventory, context.inference, model_result)
     payload = contract_to_dict(contract)
     _report_progress(progress, _ready_status(payload))
     return payload

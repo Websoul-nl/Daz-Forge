@@ -395,7 +395,7 @@ class MainWindow(QMainWindow):
         model_name: str,
     ) -> MetadataSuggestionProvider:
         if provider_key == "ollama":
-            return OllamaProvider(model=model_name or "qwen3:4b", timeout_seconds=120)
+            return OllamaProvider(model=model_name or "qwen3:4b", timeout_seconds=35)
         if provider_key == "lm-studio":
             return LMStudioProvider(model=model_name or "qwen/qwen3-4b", timeout_seconds=120)
         raise ValueError(f"Unknown model provider: {provider_key}")
@@ -558,7 +558,10 @@ def analyze_source(
     inference = infer_metadata(scan, inventory)
     model_result = None
     if provider is not None:
-        _report_progress(progress, f"Asking model... {smart_content_count} / {smart_content_count}")
+        _report_progress(
+            progress,
+            f"Asking {_provider_progress_label(provider)}... {smart_content_count} / {smart_content_count}",
+        )
         model_result = request_model_suggestions(provider, build_model_packet(inference))
     _report_progress(progress, "Building review grid...")
     contract = build_review_contract(scan, inventory, inference, model_result)
@@ -570,6 +573,22 @@ def analyze_source(
 def _report_progress(progress: Callable[[str], None] | None, message: str) -> None:
     if progress is not None:
         progress(message)
+
+
+def _provider_progress_label(provider: MetadataSuggestionProvider) -> str:
+    name = str(getattr(provider, "name", "model")).strip() or "model"
+    model = str(getattr(provider, "model", "")).strip()
+    timeout_seconds = getattr(provider, "timeout_seconds", None)
+    display_names = {
+        "lm-studio": "LM Studio",
+        "ollama": "Ollama",
+    }
+    parts = [display_names.get(name, name)]
+    if model:
+        parts.append(model)
+    if timeout_seconds:
+        parts.append(f"(up to {timeout_seconds}s)")
+    return " ".join(parts)
 
 
 def _ready_status(contract: dict[str, Any]) -> str:

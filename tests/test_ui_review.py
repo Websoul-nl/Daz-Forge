@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from forge.analyzer.inference import infer_metadata
 from forge.analyzer.inventory import classify_inventory
+from forge.analyzer.model_provider import OllamaProvider
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
 from forge.ui.main_window import MainWindow
@@ -221,6 +222,7 @@ def test_table_model_can_apply_model_suggestion() -> None:
 
 class StaticProvider:
     name = "fake-model"
+    model = "local-test"
 
     def suggest(self, packet):
         return {
@@ -236,6 +238,12 @@ class StaticProvider:
                 }
             ]
         }
+
+
+class TimedOllamaProvider(StaticProvider):
+    name = "ollama"
+    model = "qwen3:4b"
+    timeout_seconds = 35
 
 
 def test_analyze_source_can_include_model_suggestions(tmp_path: Path) -> None:
@@ -260,6 +268,24 @@ def test_analyze_source_reports_progress_messages(tmp_path: Path) -> None:
     assert "Inferring metadata... 1 / 1" in messages
     assert "Building review grid..." in messages
     assert messages[-1] == "Ready: 1 rows, 0 blockers, 1 warnings"
+
+
+def test_analyze_source_progress_names_model_provider(tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    messages = []
+
+    analyze_source(tmp_path, provider=StaticProvider(), progress=messages.append)
+
+    assert "Asking fake-model local-test... 1 / 1" in messages
+
+
+def test_analyze_source_progress_shows_friendly_provider_timeout(tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    messages = []
+
+    analyze_source(tmp_path, provider=TimedOllamaProvider(), progress=messages.append)
+
+    assert "Asking Ollama qwen3:4b (up to 35s)... 1 / 1" in messages
 
 
 def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) -> None:
@@ -398,6 +424,15 @@ def test_model_provider_selector_hides_not_installed_providers(qapp) -> None:
 
     assert options == ["Ollama", "Off"]
     assert window.provider_combo.currentText() == "Ollama"
+
+
+def test_ollama_default_provider_has_short_timeout(qapp) -> None:
+    window = MainWindow(available_model_providers=("ollama",))
+
+    provider = window._default_model_provider_factory("ollama", "qwen3:4b")
+
+    assert isinstance(provider, OllamaProvider)
+    assert provider.timeout_seconds == 35
 
 
 def test_model_provider_selector_falls_back_to_off_when_none_installed(qapp) -> None:

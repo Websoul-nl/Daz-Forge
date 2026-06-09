@@ -10,6 +10,8 @@ from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -76,6 +78,38 @@ class AnalysisContext:
     inference: InferenceResult
 
 
+class ModelSuggestionDialog(QDialog):
+    def __init__(self, diffs: list[dict[str, Any]], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Model Suggestions")
+        self.resize(720, 420)
+        self.diff_list = QListWidget()
+        for diff in diffs:
+            item = QListWidgetItem(_model_diff_label(diff))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            item.setData(Qt.ItemDataRole.UserRole, diff)
+            self.diff_list.addItem(item)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Apply Checked")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Choose which model suggestions to copy into the grid."))
+        layout.addWidget(self.diff_list, 1)
+        layout.addWidget(buttons)
+
+    def selected_diffs(self) -> list[dict[str, Any]]:
+        selected = []
+        for index in range(self.diff_list.count()):
+            item = self.diff_list.item(index)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected.append(deepcopy(item.data(Qt.ItemDataRole.UserRole)))
+        return selected
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -104,7 +138,6 @@ class MainWindow(QMainWindow):
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Select a product folder or zip")
         self.browse_button = QPushButton("Browse")
-        self.analyze_button = QPushButton("Analyze")
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter rows")
         self.warnings_only_checkbox = QCheckBox("Warnings only")
@@ -114,7 +147,7 @@ class MainWindow(QMainWindow):
         self.model_name_edit = QLineEdit(self._default_model_name(self.provider_combo.currentText()))
         self.model_name_edit.setPlaceholderText("Model")
         self.model_name_edit.setMinimumWidth(220)
-        self.use_model_button = QPushButton("Use Model")
+        self.ask_model_button = QPushButton("Ask Model")
         self.use_support_button = QPushButton("Use Support")
         self.mark_row_reviewed_button = QPushButton("Mark Row Reviewed")
         self.mark_issue_reviewed_button = QPushButton("Mark Issue Reviewed")
@@ -158,16 +191,11 @@ class MainWindow(QMainWindow):
         if not source_text:
             self._set_issue_lines(["No source selected."])
             return
-        try:
-            provider = self._selected_model_provider()
-        except Exception as exc:
-            self._set_issue_lines([f"Analysis failed: {exc}"])
-            return
         source = Path(source_text)
         if self.run_analysis_synchronously:
-            self._run_analysis_synchronously(source, provider)
+            self._run_analysis_synchronously(source, None)
         else:
-            self._start_analysis(source, provider)
+            self._start_analysis(source, None)
 
     def set_contract(self, contract: dict[str, Any]) -> None:
         self.current_contract = contract
@@ -241,7 +269,6 @@ class MainWindow(QMainWindow):
         source_bar = QHBoxLayout()
         source_bar.addWidget(self.source_edit, 1)
         source_bar.addWidget(self.browse_button)
-        source_bar.addWidget(self.analyze_button)
         layout.addLayout(source_bar)
 
         layout.addWidget(self.summary_label)
@@ -267,7 +294,7 @@ class MainWindow(QMainWindow):
         model_bar = QHBoxLayout()
         model_bar.addWidget(self.provider_combo)
         model_bar.addWidget(self.model_name_edit, 1)
-        model_bar.addWidget(self.use_model_button)
+        model_bar.addWidget(self.ask_model_button)
         detail_layout.addLayout(model_bar)
         action_bar = QHBoxLayout()
         action_bar.addWidget(self.use_support_button)
@@ -291,12 +318,11 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.browse_button.clicked.connect(self._browse_source)
-        self.analyze_button.clicked.connect(self.analyze_current_source)
         self.source_edit.returnPressed.connect(self.analyze_current_source)
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.warnings_only_checkbox.toggled.connect(self._apply_filter)
         self.provider_combo.currentTextChanged.connect(self._provider_changed)
-        self.use_model_button.clicked.connect(self.apply_model_to_selected_row)
+        self.ask_model_button.clicked.connect(self.ask_model_for_current_source)
         self.use_support_button.clicked.connect(self.apply_support_to_selected_row)
         self.mark_row_reviewed_button.clicked.connect(self.mark_selected_row_reviewed)
         self.mark_issue_reviewed_button.clicked.connect(self.mark_selected_issue_reviewed)
@@ -313,6 +339,27 @@ class MainWindow(QMainWindow):
     def apply_model_to_selected_row(self) -> None:
         if self.table_model.apply_model_to_row(self.table_view.currentIndex().row()):
             self._after_warning_resolution()
+
+    def ask_model_for_current_source(self) -> None:
+        if self._analyzing:
+            return
+        source_text = self.source_edit.text().strip()
+        if not source_text:
+            self._set_issue_lines(["No source selected."])
+            return
+        try:
+            provider = self._selected_model_provider()
+        except Exception as exc:
+            self._set_issue_lines([f"Model analysis failed: {exc}"])
+            return
+        if provider is None:
+            self._set_issue_lines(["Model provider is off."])
+            return
+        source = Path(source_text)
+        if self.run_analysis_synchronously:
+            self._run_analysis_synchronously(source, provider, show_deterministic=False)
+        else:
+            self._start_analysis(source, provider, show_deterministic=False)
 
     def _issue_lines(self) -> list[str]:
         product_warnings = self._product_warning_issues()
@@ -359,7 +406,7 @@ class MainWindow(QMainWindow):
     def _update_model_controls(self) -> None:
         can_use_model = self.provider_combo.currentText() != "Off" and not self._analyzing
         self.model_name_edit.setEnabled(can_use_model)
-        self.use_model_button.setEnabled(can_use_model)
+        self.ask_model_button.setEnabled(can_use_model)
 
     def _selected_model_provider(self) -> MetadataSuggestionProvider | None:
         provider_name = self.provider_combo.currentText()
@@ -423,26 +470,40 @@ class MainWindow(QMainWindow):
         self,
         source: Path,
         provider: MetadataSuggestionProvider | None,
+        show_deterministic: bool = True,
     ) -> None:
         self._set_analyzing(True)
         try:
-            contract = analyze_source(source, provider=provider, progress=self._analysis_progress)
+            if provider is None:
+                contract = analyze_source(source, progress=self._analysis_progress)
+            elif show_deterministic:
+                contract = analyze_source(source, provider=provider, progress=self._analysis_progress)
+            else:
+                context = _analyze_source_context(source, progress=self._analysis_progress)
+                model_result = _request_model_result(provider, context, progress=self._analysis_progress)
+                contract = _build_analysis_payload(context, model_result, progress=self._analysis_progress)
         except Exception as exc:
             self._analysis_failed(str(exc))
             return
         self._analysis_finished(contract)
 
-    def _start_analysis(self, source: Path, provider: MetadataSuggestionProvider | None) -> None:
+    def _start_analysis(
+        self,
+        source: Path,
+        provider: MetadataSuggestionProvider | None,
+        show_deterministic: bool = True,
+    ) -> None:
         self._set_analyzing(True)
-        self.summary_label.setText("Analyzing...")
-        self._set_issue_lines(["Analyzing source..."])
+        self.summary_label.setText("Analyzing..." if provider is None else "Asking model...")
+        self._set_issue_lines(["Analyzing source..." if provider is None else "Asking model..."])
         thread = QThread(self)
         worker = AnalysisWorker(source, provider=provider)
         worker.moveToThread(thread)
 
         thread.started.connect(worker.run)
         worker.progress.connect(self._analysis_progress)
-        worker.deterministic_finished.connect(self._analysis_deterministic_finished)
+        if show_deterministic:
+            worker.deterministic_finished.connect(self._analysis_deterministic_finished)
         worker.finished.connect(self._analysis_finished)
         worker.failed.connect(self._analysis_failed)
         worker.finished.connect(thread.quit)
@@ -461,7 +522,7 @@ class MainWindow(QMainWindow):
 
     def _analysis_finished(self, contract: dict[str, Any]) -> None:
         if self._should_merge_model_contract(contract):
-            self._merge_model_contract(contract)
+            self._show_model_suggestions(contract)
         else:
             self.set_contract(contract)
         self._set_analyzing(False)
@@ -483,9 +544,7 @@ class MainWindow(QMainWindow):
         self._analyzing = analyzing
         self.source_edit.setEnabled(not analyzing)
         self.browse_button.setEnabled(not analyzing)
-        self.analyze_button.setEnabled(not analyzing)
         self.provider_combo.setEnabled(not analyzing)
-        self.analyze_button.setText("Analyzing..." if analyzing else "Analyze")
         self._update_model_controls()
 
     def _after_warning_resolution(self) -> None:
@@ -536,6 +595,21 @@ class MainWindow(QMainWindow):
         self._set_issue_lines(self._issue_lines())
         self.table_view.resizeColumnsToContents()
         self.show_row_details(0 if self.table_model.rowCount() else -1)
+
+    def _show_model_suggestions(self, model_contract: dict[str, Any]) -> None:
+        diffs = _model_suggestion_diffs(self.current_contract, model_contract)
+        self._merge_model_contract(model_contract)
+        if not diffs:
+            self._analysis_progress("Model finished: no suggested changes")
+            return
+        dialog = ModelSuggestionDialog(diffs, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected_diffs = dialog.selected_diffs()
+        if not selected_diffs:
+            return
+        self.set_contract(_apply_model_suggestion_diffs(self.current_contract, selected_diffs))
+        self._analysis_progress(f"Applied {len(selected_diffs)} model suggestion(s)")
 
     def _product_warning_issues(self) -> list[dict[str, str]]:
         row_warning_messages = set()
@@ -683,6 +757,95 @@ def _provider_progress_label(provider: MetadataSuggestionProvider) -> str:
     if timeout_seconds:
         parts.append(f"(up to {timeout_seconds}s)")
     return " ".join(parts)
+
+
+def _model_suggestion_diffs(
+    current_contract: dict[str, Any],
+    model_contract: dict[str, Any],
+) -> list[dict[str, Any]]:
+    current_rows_by_path = {
+        row.get("path", ""): row
+        for row in current_contract.get("rows", [])
+    }
+    diffs: list[dict[str, Any]] = []
+    for model_row in model_contract.get("rows", []):
+        path = model_row.get("path", "")
+        current_row = current_rows_by_path.get(path)
+        model_fields = model_row.get("model")
+        if current_row is None or not model_fields:
+            continue
+        final_fields = current_row.get("final", {})
+        for field in ("content_type", "categories", "compatibility_base", "compatibilities"):
+            current_value = _metadata_value(final_fields, field)
+            suggested_value = _metadata_value(model_fields, field)
+            if not _has_suggestion_value(suggested_value):
+                continue
+            if current_value != suggested_value:
+                diffs.append(
+                    {
+                        "path": path,
+                        "field": field,
+                        "current": current_value,
+                        "suggested": suggested_value,
+                    }
+                )
+    return diffs
+
+
+def _apply_model_suggestion_diffs(
+    contract: dict[str, Any],
+    diffs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    updated = deepcopy(contract)
+    rows_by_path = {
+        row.get("path", ""): row
+        for row in updated.get("rows", [])
+    }
+    for diff in diffs:
+        row = rows_by_path.get(diff.get("path", ""))
+        if row is None:
+            continue
+        final = row.setdefault("final", {})
+        final[str(diff.get("field", ""))] = deepcopy(diff.get("suggested"))
+    return updated
+
+
+def _metadata_value(fields: dict[str, Any], field: str) -> Any:
+    value = fields.get(field, [] if field in {"categories", "compatibilities"} else "")
+    if field in {"categories", "compatibilities"}:
+        if isinstance(value, str):
+            return [value] if value else []
+        return [str(item) for item in value if str(item)]
+    return str(value)
+
+
+def _has_suggestion_value(value: Any) -> bool:
+    if isinstance(value, list):
+        return bool(value)
+    return bool(str(value))
+
+
+def _model_diff_label(diff: dict[str, Any]) -> str:
+    return (
+        f"{diff.get('path', '')} | "
+        f"{_field_label(str(diff.get('field', '')))}: "
+        f"{_display_diff_value(diff.get('current'))} -> {_display_diff_value(diff.get('suggested'))}"
+    )
+
+
+def _field_label(field: str) -> str:
+    return {
+        "content_type": "Content Type",
+        "categories": "Category",
+        "compatibility_base": "Compatibility Base",
+        "compatibilities": "Compatibilities",
+    }.get(field, field)
+
+
+def _display_diff_value(value: Any) -> str:
+    if isinstance(value, list):
+        return "; ".join(str(item) for item in value) or "-"
+    return str(value) or "-"
 
 
 def _ready_status(contract: dict[str, Any]) -> str:

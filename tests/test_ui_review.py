@@ -15,6 +15,7 @@ from forge.analyzer.review_contract import build_review_contract, contract_to_di
 from forge.analyzer.source import scan_source
 from forge.ui.main_window import AnalysisWorker, MainWindow
 from forge.ui.main_window import analyze_source
+from forge.ui.main_window import _apply_model_suggestion_diffs, _model_suggestion_diffs
 from forge.ui.delegates import CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
 
@@ -246,6 +247,23 @@ class TimedOllamaProvider(StaticProvider):
     timeout_seconds = 35
 
 
+class ChangeProvider(StaticProvider):
+    def suggest(self, packet):
+        return {
+            "suggestions": [
+                {
+                    "path": "Scripts/Websoul/Tool.dsa",
+                    "content_type": "Script/Utility",
+                    "categories": ["/Default/Scripts/Utilities"],
+                    "compatibility_base": "",
+                    "compatibilities": [],
+                    "confidence": 0.7,
+                    "reason": "A deliberately different script category.",
+                }
+            ]
+        }
+
+
 def test_analyze_source_can_include_model_suggestions(tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
 
@@ -326,7 +344,7 @@ def test_main_window_starts_analysis_without_blocking_ui(qapp, tmp_path: Path) -
     window.analyze_current_source()
 
     assert started["source"] == tmp_path
-    assert started["provider"] is not None
+    assert started["provider"] is None
 
 
 def test_main_window_busy_state_disables_analysis_controls(qapp) -> None:
@@ -334,17 +352,15 @@ def test_main_window_busy_state_disables_analysis_controls(qapp) -> None:
 
     window._set_analyzing(True)
 
-    assert window.analyze_button.isEnabled() is False
     assert window.browse_button.isEnabled() is False
     assert window.source_edit.isEnabled() is False
-    assert window.analyze_button.text() == "Analyzing..."
+    assert window.ask_model_button.isEnabled() is False
 
     window._set_analyzing(False)
 
-    assert window.analyze_button.isEnabled() is True
     assert window.browse_button.isEnabled() is True
     assert window.source_edit.isEnabled() is True
-    assert window.analyze_button.text() == "Analyze"
+    assert window.ask_model_button.isEnabled() is True
 
 
 def test_main_window_filter_controls_and_details_panel(qapp) -> None:
@@ -376,9 +392,25 @@ def test_main_window_warning_resolution_buttons(qapp) -> None:
     assert "Dress.duf: support-category-conflict" not in window.issue_text()
 
 
-def test_main_window_can_use_configured_model_provider(qapp, tmp_path: Path) -> None:
+def test_main_window_loads_source_without_model_provider(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+
+    def factory(provider_key, model_name):
+        raise AssertionError("source loading should not ask the model")
+
+    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True)
+    window.set_source_path(tmp_path)
+
+    window.analyze_current_source()
+
+    assert window.current_contract["product"]["model_provider"] == ""
+    assert window.current_contract["rows"][0]["model"] is None
+
+
+def test_main_window_can_ask_configured_model_provider(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
     requested = {}
+    captured = {}
 
     def factory(provider_key, model_name):
         requested["provider_key"] = provider_key
@@ -386,13 +418,22 @@ def test_main_window_can_use_configured_model_provider(qapp, tmp_path: Path) -> 
         return StaticProvider()
 
     window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True)
+    window._show_model_suggestions = lambda contract: captured.setdefault("contract", contract)
     window.set_source_path(tmp_path)
-
     window.analyze_current_source()
 
+    window.ask_model_for_current_source()
+
     assert requested == {"provider_key": "ollama", "model_name": "qwen3:4b"}
-    assert window.current_contract["product"]["model_provider"] == "fake-model"
-    assert window.current_contract["rows"][0]["model"]["reason"] == "Script path is a utility."
+    assert captured["contract"]["product"]["model_provider"] == "fake-model"
+    assert captured["contract"]["rows"][0]["model"]["reason"] == "Script path is a utility."
+
+
+def test_main_window_has_ask_model_instead_of_top_analyze(qapp) -> None:
+    window = MainWindow(available_model_providers=("ollama",))
+
+    assert not hasattr(window, "analyze_button")
+    assert window.ask_model_button.text() == "Ask Model"
 
 
 def test_model_provider_controls_default_to_ollama_and_can_be_disabled(qapp) -> None:
@@ -401,12 +442,12 @@ def test_model_provider_controls_default_to_ollama_and_can_be_disabled(qapp) -> 
     assert window.provider_combo.currentText() == "Ollama"
     assert window.model_name_edit.text() == "qwen3:4b"
     assert window.model_name_edit.isEnabled() is True
-    assert window.use_model_button.isEnabled() is True
+    assert window.ask_model_button.isEnabled() is True
 
     window.provider_combo.setCurrentText("Off")
 
     assert window.model_name_edit.isEnabled() is False
-    assert window.use_model_button.isEnabled() is False
+    assert window.ask_model_button.isEnabled() is False
 
 
 def test_model_provider_switch_updates_default_model_name(qapp) -> None:
@@ -462,6 +503,35 @@ def test_main_window_merges_model_result_without_overwriting_user_edits(qapp, tm
     assert window.current_contract["product"]["model_provider"] == "fake-model"
 
 
+def test_model_suggestion_diffs_show_only_model_changes(tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    deterministic_payload = analyze_source(tmp_path)
+    model_payload = analyze_source(tmp_path, provider=ChangeProvider())
+
+    diffs = _model_suggestion_diffs(deterministic_payload, model_payload)
+
+    assert diffs == [
+        {
+            "path": "Scripts/Websoul/Tool.dsa",
+            "field": "categories",
+            "current": ["/Default/Utilities/Scripts"],
+            "suggested": ["/Default/Scripts/Utilities"],
+        }
+    ]
+
+
+def test_apply_model_suggestion_diffs_copies_checked_findings_only(tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    deterministic_payload = analyze_source(tmp_path)
+    model_payload = analyze_source(tmp_path, provider=ChangeProvider())
+    diffs = _model_suggestion_diffs(deterministic_payload, model_payload)
+
+    updated = _apply_model_suggestion_diffs(deterministic_payload, diffs)
+
+    assert updated["rows"][0]["final"]["categories"] == ["/Default/Scripts/Utilities"]
+    assert deterministic_payload["rows"][0]["final"]["categories"] == ["/Default/Utilities/Scripts"]
+
+
 def test_ollama_default_provider_has_timeout_for_background_analysis(qapp) -> None:
     window = MainWindow(available_model_providers=("ollama",))
 
@@ -479,7 +549,7 @@ def test_model_provider_selector_falls_back_to_off_when_none_installed(qapp) -> 
     assert options == ["Off"]
     assert window.provider_combo.currentText() == "Off"
     assert window.model_name_edit.isEnabled() is False
-    assert window.use_model_button.isEnabled() is False
+    assert window.ask_model_button.isEnabled() is False
 
 
 def test_content_type_column_uses_searchable_picker(qapp) -> None:

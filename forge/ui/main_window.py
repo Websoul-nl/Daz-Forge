@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
@@ -59,6 +60,7 @@ class MainWindow(QMainWindow):
     def __init__(
         self,
         model_provider_factory: Callable[[str, str], MetadataSuggestionProvider] | None = None,
+        available_model_providers: tuple[str, ...] | None = None,
         run_analysis_synchronously: bool = False,
     ) -> None:
         super().__init__()
@@ -73,6 +75,11 @@ class MainWindow(QMainWindow):
         self.current_contract: dict[str, Any] = {"rows": [], "warnings": [], "hard_blockers": []}
         self.table_model = ReviewTableModel(self.current_contract)
         self.model_provider_factory = model_provider_factory or self._default_model_provider_factory
+        self.available_model_providers = (
+            available_model_providers
+            if available_model_providers is not None
+            else self._detect_available_model_providers()
+        )
 
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Select a product folder or zip")
@@ -82,9 +89,9 @@ class MainWindow(QMainWindow):
         self.filter_edit.setPlaceholderText("Filter rows")
         self.warnings_only_checkbox = QCheckBox("Warnings only")
         self.provider_combo = QComboBox()
-        self.provider_combo.addItems(["Ollama", "LM Studio", "Off"])
-        self.provider_combo.setCurrentText("Ollama")
-        self.model_name_edit = QLineEdit("qwen3:4b")
+        self.provider_combo.addItems(self._provider_labels())
+        self.provider_combo.setCurrentText(self._default_provider_label())
+        self.model_name_edit = QLineEdit(self._default_model_name(self.provider_combo.currentText()))
         self.model_name_edit.setPlaceholderText("Model")
         self.model_name_edit.setMinimumWidth(220)
         self.use_model_button = QPushButton("Use Model")
@@ -117,6 +124,7 @@ class MainWindow(QMainWindow):
 
         self._build_layout()
         self._connect_signals()
+        self._update_model_controls()
         self._apply_style()
 
     def set_source_path(self, path: Path) -> None:
@@ -347,6 +355,37 @@ class MainWindow(QMainWindow):
         if provider_name == "LM Studio":
             return "lm-studio"
         return "off"
+
+    def _detect_available_model_providers(self) -> tuple[str, ...]:
+        providers = []
+        if shutil.which("ollama"):
+            providers.append("ollama")
+        if shutil.which("lms"):
+            providers.append("lm-studio")
+        return tuple(providers)
+
+    def _provider_labels(self) -> list[str]:
+        labels = []
+        if "ollama" in self.available_model_providers:
+            labels.append("Ollama")
+        if "lm-studio" in self.available_model_providers:
+            labels.append("LM Studio")
+        labels.append("Off")
+        return labels
+
+    def _default_provider_label(self) -> str:
+        if "ollama" in self.available_model_providers:
+            return "Ollama"
+        if "lm-studio" in self.available_model_providers:
+            return "LM Studio"
+        return "Off"
+
+    def _default_model_name(self, provider_name: str) -> str:
+        if provider_name == "Ollama":
+            return "qwen3:4b"
+        if provider_name == "LM Studio":
+            return "qwen/qwen3-4b"
+        return ""
 
     def _default_model_provider_factory(
         self,

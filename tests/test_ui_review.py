@@ -347,7 +347,7 @@ def test_main_window_can_use_configured_model_provider(qapp, tmp_path: Path) -> 
 
 
 def test_model_provider_controls_default_to_ollama_and_can_be_disabled(qapp) -> None:
-    window = MainWindow()
+    window = MainWindow(available_model_providers=("ollama", "lm-studio"))
 
     assert window.provider_combo.currentText() == "Ollama"
     assert window.model_name_edit.text() == "qwen3:4b"
@@ -361,11 +361,31 @@ def test_model_provider_controls_default_to_ollama_and_can_be_disabled(qapp) -> 
 
 
 def test_model_provider_switch_updates_default_model_name(qapp) -> None:
-    window = MainWindow()
+    window = MainWindow(available_model_providers=("ollama", "lm-studio"))
 
     window.provider_combo.setCurrentText("LM Studio")
 
     assert window.model_name_edit.text() == "qwen/qwen3-4b"
+
+
+def test_model_provider_selector_hides_not_installed_providers(qapp) -> None:
+    window = MainWindow(available_model_providers=("ollama",))
+
+    options = [window.provider_combo.itemText(index) for index in range(window.provider_combo.count())]
+
+    assert options == ["Ollama", "Off"]
+    assert window.provider_combo.currentText() == "Ollama"
+
+
+def test_model_provider_selector_falls_back_to_off_when_none_installed(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+
+    options = [window.provider_combo.itemText(index) for index in range(window.provider_combo.count())]
+
+    assert options == ["Off"]
+    assert window.provider_combo.currentText() == "Off"
+    assert window.model_name_edit.isEnabled() is False
+    assert window.use_model_button.isEnabled() is False
 
 
 def test_content_type_column_uses_searchable_picker(qapp) -> None:

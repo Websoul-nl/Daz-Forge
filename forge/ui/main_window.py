@@ -40,6 +40,7 @@ from forge.ui.review_model import ReviewTableModel
 
 
 class AnalysisWorker(QObject):
+    progress = Signal(str)
     finished = Signal(dict)
     failed = Signal(str)
 
@@ -51,7 +52,7 @@ class AnalysisWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            self.finished.emit(analyze_source(self.source, provider=self.provider))
+            self.finished.emit(analyze_source(self.source, provider=self.provider, progress=self.progress.emit))
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -125,6 +126,7 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._connect_signals()
         self._update_model_controls()
+        self.statusBar().showMessage("Ready")
         self._apply_style()
 
     def set_source_path(self, path: Path) -> None:
@@ -405,7 +407,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         self._set_analyzing(True)
         try:
-            contract = analyze_source(source, provider=provider)
+            contract = analyze_source(source, provider=provider, progress=self._analysis_progress)
         except Exception as exc:
             self._analysis_failed(str(exc))
             return
@@ -420,6 +422,7 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
 
         thread.started.connect(worker.run)
+        worker.progress.connect(self._analysis_progress)
         worker.finished.connect(self._analysis_finished)
         worker.failed.connect(self._analysis_failed)
         worker.finished.connect(thread.quit)
@@ -440,7 +443,11 @@ class MainWindow(QMainWindow):
     def _analysis_failed(self, message: str) -> None:
         self.summary_label.setText("Analysis failed")
         self._set_issue_lines([f"Analysis failed: {message}"])
+        self._analysis_progress(f"Analysis failed: {message}")
         self._set_analyzing(False)
+
+    def _analysis_progress(self, message: str) -> None:
+        self.statusBar().showMessage(message)
 
     def _analysis_thread_finished(self) -> None:
         self.analysis_thread = None
@@ -538,12 +545,35 @@ class MainWindow(QMainWindow):
 def analyze_source(
     source: Path,
     provider: MetadataSuggestionProvider | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
+    _report_progress(progress, "Scanning source...")
     scan = scan_source(source)
+    total_files = len(scan.files)
+    _report_progress(progress, f"Scanned {total_files} files")
+    _report_progress(progress, f"Classifying files... {total_files} / {total_files}")
     inventory = classify_inventory(scan)
+    smart_content_count = len(inventory.smart_content)
+    _report_progress(progress, f"Inferring metadata... {smart_content_count} / {smart_content_count}")
     inference = infer_metadata(scan, inventory)
     model_result = None
     if provider is not None:
+        _report_progress(progress, f"Asking model... {smart_content_count} / {smart_content_count}")
         model_result = request_model_suggestions(provider, build_model_packet(inference))
+    _report_progress(progress, "Building review grid...")
     contract = build_review_contract(scan, inventory, inference, model_result)
-    return contract_to_dict(contract)
+    payload = contract_to_dict(contract)
+    _report_progress(progress, _ready_status(payload))
+    return payload
+
+
+def _report_progress(progress: Callable[[str], None] | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
+
+
+def _ready_status(contract: dict[str, Any]) -> str:
+    rows = len(contract.get("rows", []))
+    blockers = len(contract.get("hard_blockers", []))
+    warnings = len(contract.get("warnings", []))
+    return f"Ready: {rows} rows, {blockers} blockers, {warnings} warnings"

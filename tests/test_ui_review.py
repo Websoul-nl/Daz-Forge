@@ -248,6 +248,20 @@ def test_analyze_source_can_include_model_suggestions(tmp_path: Path) -> None:
     assert payload["rows"][0]["model"]["categories"] == ["/Default/Utilities/Scripts"]
 
 
+def test_analyze_source_reports_progress_messages(tmp_path: Path) -> None:
+    write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
+    messages = []
+
+    payload = analyze_source(tmp_path, progress=messages.append)
+
+    assert payload["product"]["smart_content_count"] == 1
+    assert messages[0] == "Scanning source..."
+    assert "Classifying files... 1 / 1" in messages
+    assert "Inferring metadata... 1 / 1" in messages
+    assert "Building review grid..." in messages
+    assert messages[-1] == "Ready: 1 rows, 0 blockers, 1 warnings"
+
+
 def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
 
@@ -260,6 +274,15 @@ def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) 
     assert window.table_model.rowCount() == 1
     assert "Scripts/Websoul/Tool.dsa" in window.current_contract["rows"][0]["path"]
     assert "Hard blockers: 0" in window.issue_text()
+    assert window.statusBar().currentMessage() == "Ready: 1 rows, 0 blockers, 1 warnings"
+
+
+def test_main_window_status_bar_can_show_analysis_progress(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+
+    window._analysis_progress("Classifying files... 5 / 34")
+
+    assert window.statusBar().currentMessage() == "Classifying files... 5 / 34"
 
 
 def test_main_window_starts_analysis_without_blocking_ui(qapp, tmp_path: Path) -> None:

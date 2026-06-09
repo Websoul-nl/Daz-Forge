@@ -40,15 +40,21 @@ def analyze(path: Path, model_result: ModelSuggestionResult | None = None):
 
 
 def test_product_summary_contains_source_counts_and_model_status(tmp_path: Path) -> None:
-    write_file(tmp_path / "People" / "Genesis 9" / "Hair" / "Websoul" / "Hero Hair.duf", dson("wearable"))
-    write_file(tmp_path / "People" / "Genesis 9" / "Hair" / "Websoul" / "Hero Hair.duf.jpg")
-    write_file(tmp_path / "Documentation" / "Hero Hair" / "ReadMe.txt", "license-ish")
+    product_root = tmp_path / "Hero Hair Product"
+    write_file(product_root / "People" / "Genesis 9" / "Hair" / "Websoul" / "Hero Hair.duf", dson("wearable"))
+    write_file(product_root / "People" / "Genesis 9" / "Hair" / "Websoul" / "Hero Hair.duf.jpg")
+    write_file(product_root / "Documentation" / "Hero Hair" / "ReadMe.txt", "license-ish")
     model = ModelSuggestionResult(provider="fake", available=False, suggestions=(), warnings=("model-unavailable",))
 
-    contract = analyze(tmp_path, model)
+    contract = analyze(product_root, model)
 
     assert contract.product.source_kind == "folder"
     assert contract.product.content_root == ""
+    assert contract.product.product_name == "Hero Hair Product"
+    assert contract.product.store_display_name == ""
+    assert contract.product.store_id == ""
+    assert contract.product.store_code == ""
+    assert contract.product.product_token == ""
     assert contract.product.product_type == "hair"
     assert contract.product.primary_artist == "Websoul"
     assert contract.product.model_provider == "fake"

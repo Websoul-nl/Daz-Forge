@@ -42,6 +42,7 @@ from forge.analyzer.model_provider import (
 )
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import SourceScan, scan_source
+from forge.settings import AppSettings
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
 
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self,
         model_provider_factory: Callable[[str, str], MetadataSuggestionProvider] | None = None,
         available_model_providers: tuple[str, ...] | None = None,
+        app_settings: AppSettings | None = None,
         run_analysis_synchronously: bool = False,
     ) -> None:
         super().__init__()
@@ -126,6 +128,8 @@ class MainWindow(QMainWindow):
         self.analysis_thread: QThread | None = None
         self.analysis_worker: AnalysisWorker | None = None
         self.run_analysis_synchronously = run_analysis_synchronously
+        self.app_settings = app_settings or AppSettings.defaults()
+        self._syncing_product_fields = False
         self.current_contract: dict[str, Any] = {"rows": [], "warnings": [], "hard_blockers": []}
         self.table_model = ReviewTableModel(self.current_contract)
         self.model_provider_factory = model_provider_factory or self._default_model_provider_factory
@@ -141,6 +145,16 @@ class MainWindow(QMainWindow):
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter rows")
         self.warnings_only_checkbox = QCheckBox("Warnings only")
+        self.product_name_edit = QLineEdit()
+        self.product_name_edit.setPlaceholderText("Product name")
+        self.store_edit = QLineEdit()
+        self.store_edit.setPlaceholderText("Store")
+        self.store_code_edit = QLineEdit()
+        self.store_code_edit.setPlaceholderText("Store code")
+        self.token_edit = QLineEdit()
+        self.token_edit.setPlaceholderText("Token")
+        self.artists_edit = QLineEdit()
+        self.artists_edit.setPlaceholderText("Artists")
         self.provider_combo = QComboBox()
         self.provider_combo.addItems(self._provider_labels())
         self.provider_combo.setCurrentText(self._default_provider_label())
@@ -199,8 +213,10 @@ class MainWindow(QMainWindow):
 
     def set_contract(self, contract: dict[str, Any]) -> None:
         self.current_contract = contract
+        self._ensure_product_metadata()
+        self._populate_product_fields()
         self.reviewed_issue_messages = set()
-        self.table_model.set_contract(contract)
+        self.table_model.set_contract(self.current_contract)
         self.summary_label.setText(self.summary_text())
         self._set_issue_lines(self._issue_lines())
         self.table_view.resizeColumnsToContents()
@@ -273,6 +289,19 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.summary_label)
 
+        product_bar = QHBoxLayout()
+        product_bar.addWidget(QLabel("Product"))
+        product_bar.addWidget(self.product_name_edit, 2)
+        product_bar.addWidget(QLabel("Store"))
+        product_bar.addWidget(self.store_edit, 1)
+        product_bar.addWidget(QLabel("Code"))
+        product_bar.addWidget(self.store_code_edit)
+        product_bar.addWidget(QLabel("Token"))
+        product_bar.addWidget(self.token_edit)
+        product_bar.addWidget(QLabel("Artists"))
+        product_bar.addWidget(self.artists_edit, 2)
+        layout.addLayout(product_bar)
+
         splitter = QSplitter(Qt.Orientation.Vertical)
         review_splitter = QSplitter(Qt.Orientation.Horizontal)
         grid_container = QWidget()
@@ -319,6 +348,14 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.browse_button.clicked.connect(self._browse_source)
         self.source_edit.returnPressed.connect(self.analyze_current_source)
+        for product_field in (
+            self.product_name_edit,
+            self.store_edit,
+            self.store_code_edit,
+            self.token_edit,
+            self.artists_edit,
+        ):
+            product_field.textChanged.connect(self._product_metadata_changed)
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.warnings_only_checkbox.toggled.connect(self._apply_filter)
         self.provider_combo.currentTextChanged.connect(self._provider_changed)
@@ -552,6 +589,53 @@ class MainWindow(QMainWindow):
         self._set_issue_lines(self._issue_lines())
         self.show_row_details(0 if self.table_model.rowCount() else -1)
         self.table_view.resizeColumnsToContents()
+
+    def _ensure_product_metadata(self) -> None:
+        product = self.current_contract.setdefault("product", {})
+        source_path = product.get("source_path", "")
+        if not product.get("product_name"):
+            product["product_name"] = Path(source_path).stem if source_path else ""
+        if not product.get("store_display_name"):
+            product["store_display_name"] = self.app_settings.default_store.display_name
+        if not product.get("store_id"):
+            product["store_id"] = self.app_settings.default_store.store_id
+        if not product.get("store_code"):
+            product["store_code"] = self.app_settings.default_store.dim_prefix
+        if not product.get("product_token"):
+            product["product_token"] = str(self.app_settings.next_product_number)
+        artists = [str(artist) for artist in product.get("artists", []) if str(artist)]
+        primary_artist = str(product.get("primary_artist", ""))
+        if not artists and primary_artist:
+            artists = [primary_artist]
+            product["artists"] = artists
+        if artists and not primary_artist:
+            product["primary_artist"] = artists[0]
+
+    def _populate_product_fields(self) -> None:
+        product = self.current_contract.get("product", {})
+        self._syncing_product_fields = True
+        try:
+            self.product_name_edit.setText(str(product.get("product_name", "")))
+            self.store_edit.setText(str(product.get("store_display_name", "")))
+            self.store_code_edit.setText(str(product.get("store_code") or product.get("store_id", "")))
+            self.token_edit.setText(str(product.get("product_token", "")))
+            self.artists_edit.setText("; ".join(str(artist) for artist in product.get("artists", []) if str(artist)))
+        finally:
+            self._syncing_product_fields = False
+
+    def _product_metadata_changed(self) -> None:
+        if self._syncing_product_fields:
+            return
+        product = self.current_contract.setdefault("product", {})
+        artists = _split_product_artists(self.artists_edit.text())
+        product["product_name"] = self.product_name_edit.text().strip()
+        product["store_display_name"] = self.store_edit.text().strip()
+        product["store_id"] = self.store_code_edit.text().strip()
+        product["store_code"] = self.store_code_edit.text().strip()
+        product["product_token"] = self.token_edit.text().strip()
+        product["artists"] = artists
+        product["primary_artist"] = artists[0] if artists else ""
+        self.summary_label.setText(self.summary_text())
 
     def _should_merge_model_contract(self, contract: dict[str, Any]) -> bool:
         product = contract.get("product", {})
@@ -846,6 +930,11 @@ def _display_diff_value(value: Any) -> str:
     if isinstance(value, list):
         return "; ".join(str(item) for item in value) or "-"
     return str(value) or "-"
+
+
+def _split_product_artists(value: str) -> list[str]:
+    normalized = value.replace("\n", ";").replace(",", ";")
+    return [part.strip() for part in normalized.split(";") if part.strip()]
 
 
 def _ready_status(contract: dict[str, Any]) -> str:

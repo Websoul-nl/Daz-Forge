@@ -17,6 +17,7 @@ class ProductReviewSummary:
     source_path: str
     source_kind: str
     content_root: str
+    product_name: str
     product_type: str
     primary_artist: str
     artist_state: str
@@ -28,6 +29,10 @@ class ProductReviewSummary:
     ignored_count: int
     model_provider: str = ""
     model_available: bool = False
+    store_display_name: str = ""
+    store_id: str = ""
+    store_code: str = ""
+    product_token: str = ""
 
 
 @dataclass(frozen=True)
@@ -123,6 +128,7 @@ def _build_product_summary(
         source_path=scan.source_path,
         source_kind=scan.source_kind,
         content_root=scan.content_root,
+        product_name=_source_product_name(scan),
         product_type=inference.product.product_type,
         primary_artist=inference.product.primary_artist,
         artist_state=inference.product.artist_state,
@@ -135,6 +141,11 @@ def _build_product_summary(
         model_provider=model_result.provider if model_result is not None else "",
         model_available=model_result.available if model_result is not None else False,
     )
+
+
+def _source_product_name(scan: SourceScan) -> str:
+    path = PurePosixPath(scan.source_path.replace("\\", "/"))
+    return path.stem or path.name
 
 
 def _build_asset_row(

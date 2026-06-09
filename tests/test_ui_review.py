@@ -321,6 +321,42 @@ def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) 
     assert window.statusBar().currentMessage() == "Ready: 1 rows, 0 blockers, 1 warnings"
 
 
+def test_main_window_prefills_product_metadata_fields(qapp, tmp_path: Path) -> None:
+    product_root = tmp_path / "Hero Product"
+    write_file(product_root / "Props" / "Websoul" / "Tool.duf", dson("scene_subset"))
+
+    window = MainWindow(run_analysis_synchronously=True)
+    window.set_source_path(product_root)
+    window.analyze_current_source()
+
+    assert window.product_name_edit.text() == "Hero Product"
+    assert window.store_edit.text() == "Websoul"
+    assert window.store_code_edit.text() == "WEBS"
+    assert window.token_edit.text() == "24156030"
+    assert window.artists_edit.text() == "Websoul"
+    assert window.current_contract["product"]["product_token"] == "24156030"
+
+
+def test_main_window_product_metadata_edits_update_contract(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+    window.set_contract(manual_payload())
+
+    window.product_name_edit.setText("Better Product")
+    window.store_edit.setText("Renderosity")
+    window.store_code_edit.setText("RND")
+    window.token_edit.setText("12345678")
+    window.artists_edit.setText("Sade; Websoul")
+
+    product = window.current_contract["product"]
+    assert product["product_name"] == "Better Product"
+    assert product["store_display_name"] == "Renderosity"
+    assert product["store_id"] == "RND"
+    assert product["store_code"] == "RND"
+    assert product["product_token"] == "12345678"
+    assert product["primary_artist"] == "Sade"
+    assert product["artists"] == ["Sade", "Websoul"]
+
+
 def test_main_window_status_bar_can_show_analysis_progress(qapp) -> None:
     window = MainWindow(available_model_providers=())
 

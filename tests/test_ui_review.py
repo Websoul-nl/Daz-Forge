@@ -252,7 +252,7 @@ def test_main_window_analyzes_source_and_populates_review(qapp, tmp_path: Path) 
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
 
     window = MainWindow(run_analysis_synchronously=True)
-    window.ask_model_checkbox.setChecked(False)
+    window.provider_combo.setCurrentText("Off")
     window.set_source_path(tmp_path)
     window.analyze_current_source()
 
@@ -329,26 +329,43 @@ def test_main_window_warning_resolution_buttons(qapp) -> None:
 
 def test_main_window_can_use_configured_model_provider(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Scripts" / "Websoul" / "Tool.dsa", "// script")
-    window = MainWindow(model_provider_factory=lambda model_name: StaticProvider(), run_analysis_synchronously=True)
+    requested = {}
+
+    def factory(provider_key, model_name):
+        requested["provider_key"] = provider_key
+        requested["model_name"] = model_name
+        return StaticProvider()
+
+    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True)
     window.set_source_path(tmp_path)
 
     window.analyze_current_source()
 
+    assert requested == {"provider_key": "ollama", "model_name": "qwen3:4b"}
     assert window.current_contract["product"]["model_provider"] == "fake-model"
     assert window.current_contract["rows"][0]["model"]["reason"] == "Script path is a utility."
 
 
-def test_lm_studio_controls_are_enabled_by_default_and_can_be_disabled(qapp) -> None:
+def test_model_provider_controls_default_to_ollama_and_can_be_disabled(qapp) -> None:
     window = MainWindow()
 
-    assert window.ask_model_checkbox.isChecked() is True
+    assert window.provider_combo.currentText() == "Ollama"
+    assert window.model_name_edit.text() == "qwen3:4b"
     assert window.model_name_edit.isEnabled() is True
     assert window.use_model_button.isEnabled() is True
 
-    window.ask_model_checkbox.setChecked(False)
+    window.provider_combo.setCurrentText("Off")
 
     assert window.model_name_edit.isEnabled() is False
     assert window.use_model_button.isEnabled() is False
+
+
+def test_model_provider_switch_updates_default_model_name(qapp) -> None:
+    window = MainWindow()
+
+    window.provider_combo.setCurrentText("LM Studio")
+
+    assert window.model_name_edit.text() == "qwen/qwen3-4b"
 
 
 def test_content_type_column_uses_searchable_picker(qapp) -> None:

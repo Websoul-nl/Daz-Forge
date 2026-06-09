@@ -6,6 +6,7 @@ from forge.analyzer.model_provider import (
     LMStudioProvider,
     ModelProviderError,
     ModelUnavailableError,
+    OllamaProvider,
     build_model_packet,
     request_model_suggestions,
 )
@@ -158,6 +159,95 @@ def test_lm_studio_provider_sends_openai_compatible_request(monkeypatch) -> None
     assert captured["payload"]["response_format"]["json_schema"]["name"] == "daz_forge_metadata_suggestions"
     assert "Return strict JSON" in captured["payload"]["messages"][0]["content"]
     assert "DAZ-style slash paths" in captured["payload"]["messages"][0]["content"]
+    assert response["suggestions"][0]["path"] == "Asset.duf"
+
+
+def test_ollama_provider_sends_openai_compatible_request(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "suggestions": [
+                                            {
+                                                "path": "Asset.duf",
+                                                "categories": ["/Default/Props"],
+                                                "confidence": 0.5,
+                                            }
+                                        ]
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    provider = OllamaProvider(base_url="http://127.0.0.1:11434", model="qwen3:4b", timeout_seconds=11)
+    response = provider.suggest({"assets": [{"path": "Asset.duf"}]})
+
+    assert captured["url"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert captured["timeout"] == 11
+    assert captured["payload"]["model"] == "qwen3:4b"
+    assert captured["payload"]["think"] is False
+    assert captured["payload"]["response_format"]["type"] == "json_schema"
+    assert response["suggestions"][0]["path"] == "Asset.duf"
+
+
+def test_provider_extracts_json_after_qwen_thinking_text(monkeypatch) -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "Thinking...\n"
+                                    "The user wants JSON, so I should comply.\n"
+                                    "...done thinking.\n"
+                                    '{"suggestions":[{"path":"Asset.duf","categories":["/Default/Props"],"confidence":0.5}]}'
+                                )
+                            }
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    provider = OllamaProvider()
+    response = provider.suggest({"assets": [{"path": "Asset.duf"}]})
+
     assert response["suggestions"][0]["path"] == "Asset.duf"
 
 

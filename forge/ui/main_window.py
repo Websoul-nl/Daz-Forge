@@ -6,6 +6,7 @@ from typing import Any, Callable
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -27,6 +28,7 @@ from forge.analyzer.inventory import classify_inventory
 from forge.analyzer.model_provider import (
     LMStudioProvider,
     MetadataSuggestionProvider,
+    OllamaProvider,
     build_model_packet,
     request_model_suggestions,
 )
@@ -56,7 +58,7 @@ class AnalysisWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(
         self,
-        model_provider_factory: Callable[[str], MetadataSuggestionProvider] | None = None,
+        model_provider_factory: Callable[[str, str], MetadataSuggestionProvider] | None = None,
         run_analysis_synchronously: bool = False,
     ) -> None:
         super().__init__()
@@ -70,9 +72,7 @@ class MainWindow(QMainWindow):
         self.run_analysis_synchronously = run_analysis_synchronously
         self.current_contract: dict[str, Any] = {"rows": [], "warnings": [], "hard_blockers": []}
         self.table_model = ReviewTableModel(self.current_contract)
-        self.model_provider_factory = model_provider_factory or (
-            lambda model_name: LMStudioProvider(model=model_name or "qwen/qwen3-32b", timeout_seconds=120)
-        )
+        self.model_provider_factory = model_provider_factory or self._default_model_provider_factory
 
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Select a product folder or zip")
@@ -81,10 +81,11 @@ class MainWindow(QMainWindow):
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter rows")
         self.warnings_only_checkbox = QCheckBox("Warnings only")
-        self.ask_model_checkbox = QCheckBox("Ask LM Studio")
-        self.ask_model_checkbox.setChecked(True)
-        self.model_name_edit = QLineEdit("qwen/qwen3-32b")
-        self.model_name_edit.setPlaceholderText("LM Studio model")
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems(["Ollama", "LM Studio", "Off"])
+        self.provider_combo.setCurrentText("Ollama")
+        self.model_name_edit = QLineEdit("qwen3:4b")
+        self.model_name_edit.setPlaceholderText("Model")
         self.model_name_edit.setMinimumWidth(220)
         self.use_model_button = QPushButton("Use Model")
         self.use_support_button = QPushButton("Use Support")
@@ -129,9 +130,7 @@ class MainWindow(QMainWindow):
             self._set_issue_lines(["No source selected."])
             return
         try:
-            provider = None
-            if self.ask_model_checkbox.isChecked():
-                provider = self.model_provider_factory(self.model_name_edit.text().strip())
+            provider = self._selected_model_provider()
         except Exception as exc:
             self._set_issue_lines([f"Analysis failed: {exc}"])
             return
@@ -237,7 +236,7 @@ class MainWindow(QMainWindow):
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(8)
         model_bar = QHBoxLayout()
-        model_bar.addWidget(self.ask_model_checkbox)
+        model_bar.addWidget(self.provider_combo)
         model_bar.addWidget(self.model_name_edit, 1)
         model_bar.addWidget(self.use_model_button)
         detail_layout.addLayout(model_bar)
@@ -267,7 +266,7 @@ class MainWindow(QMainWindow):
         self.source_edit.returnPressed.connect(self.analyze_current_source)
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.warnings_only_checkbox.toggled.connect(self._apply_filter)
-        self.ask_model_checkbox.toggled.connect(self._update_model_controls)
+        self.provider_combo.currentTextChanged.connect(self._provider_changed)
         self.use_model_button.clicked.connect(self.apply_model_to_selected_row)
         self.use_support_button.clicked.connect(self.apply_support_to_selected_row)
         self.mark_row_reviewed_button.clicked.connect(self.mark_selected_row_reviewed)
@@ -320,10 +319,45 @@ class MainWindow(QMainWindow):
         self._set_issue_lines(self._issue_lines())
         self.table_view.resizeColumnsToContents()
 
-    def _update_model_controls(self, enabled: bool) -> None:
-        can_use_model = enabled and not self._analyzing
+    def _provider_changed(self, provider_name: str) -> None:
+        current_model = self.model_name_edit.text().strip()
+        if provider_name == "Ollama" and current_model in ("", "qwen/qwen3-4b", "qwen/qwen3-32b"):
+            self.model_name_edit.setText("qwen3:4b")
+        elif provider_name == "LM Studio" and current_model in ("", "qwen3:4b", "qwen3:8b"):
+            self.model_name_edit.setText("qwen/qwen3-4b")
+        self._update_model_controls()
+
+    def _update_model_controls(self) -> None:
+        can_use_model = self.provider_combo.currentText() != "Off" and not self._analyzing
         self.model_name_edit.setEnabled(can_use_model)
         self.use_model_button.setEnabled(can_use_model)
+
+    def _selected_model_provider(self) -> MetadataSuggestionProvider | None:
+        provider_name = self.provider_combo.currentText()
+        if provider_name == "Off":
+            return None
+        return self.model_provider_factory(
+            self._provider_key(provider_name),
+            self.model_name_edit.text().strip(),
+        )
+
+    def _provider_key(self, provider_name: str) -> str:
+        if provider_name == "Ollama":
+            return "ollama"
+        if provider_name == "LM Studio":
+            return "lm-studio"
+        return "off"
+
+    def _default_model_provider_factory(
+        self,
+        provider_key: str,
+        model_name: str,
+    ) -> MetadataSuggestionProvider:
+        if provider_key == "ollama":
+            return OllamaProvider(model=model_name or "qwen3:4b", timeout_seconds=120)
+        if provider_key == "lm-studio":
+            return LMStudioProvider(model=model_name or "qwen/qwen3-4b", timeout_seconds=120)
+        raise ValueError(f"Unknown model provider: {provider_key}")
 
     def _run_analysis_synchronously(
         self,
@@ -378,9 +412,9 @@ class MainWindow(QMainWindow):
         self.source_edit.setEnabled(not analyzing)
         self.browse_button.setEnabled(not analyzing)
         self.analyze_button.setEnabled(not analyzing)
-        self.ask_model_checkbox.setEnabled(not analyzing)
+        self.provider_combo.setEnabled(not analyzing)
         self.analyze_button.setText("Analyzing..." if analyzing else "Analyze")
-        self._update_model_controls(self.ask_model_checkbox.isChecked())
+        self._update_model_controls()
 
     def _after_warning_resolution(self) -> None:
         self.summary_label.setText(self.summary_text())

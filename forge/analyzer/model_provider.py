@@ -93,16 +93,14 @@ def request_model_suggestions(
     return ModelSuggestionResult(provider=provider.name, available=True, suggestions=suggestions)
 
 
-class LMStudioProvider:
-    name = "lm-studio"
-
+class OpenAICompatibleProvider:
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:1234/v1",
+        base_url: str,
         model: str = "local-model",
         timeout_seconds: int = 30,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _normalize_openai_base_url(base_url)
         self.model = model
         self.timeout_seconds = timeout_seconds
 
@@ -153,6 +151,7 @@ class LMStudioProvider:
                     "role": "system",
                     "content": (
                         "Return strict JSON only. Suggest DAZ Smart Content metadata corrections. "
+                        "Return only the JSON object, without thinking text, markdown, or commentary. "
                         "Do not invent assets. Use the provided paths exactly. "
                         "Use DAZ-style slash paths: categories start with /Default/, and "
                         "compatibility_base and compatibilities start with / when a known base is provided. "
@@ -166,6 +165,7 @@ class LMStudioProvider:
                 },
             ],
         }
+        payload.update(self._extra_payload())
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -185,6 +185,43 @@ class LMStudioProvider:
 
         return _extract_openai_json_content(response_payload)
 
+    def _extra_payload(self) -> dict[str, Any]:
+        return {}
+
+
+class LMStudioProvider(OpenAICompatibleProvider):
+    name = "lm-studio"
+
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:1234/v1",
+        model: str = "local-model",
+        timeout_seconds: int = 30,
+    ) -> None:
+        super().__init__(base_url=base_url, model=model, timeout_seconds=timeout_seconds)
+
+
+class OllamaProvider(OpenAICompatibleProvider):
+    name = "ollama"
+
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:11434",
+        model: str = "qwen3:4b",
+        timeout_seconds: int = 30,
+    ) -> None:
+        super().__init__(base_url=base_url, model=model, timeout_seconds=timeout_seconds)
+
+    def _extra_payload(self) -> dict[str, Any]:
+        return {"think": False}
+
+
+def _normalize_openai_base_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if not normalized.endswith("/v1"):
+        normalized = f"{normalized}/v1"
+    return normalized
+
 
 def _extract_openai_json_content(response_payload: dict[str, Any]) -> dict[str, Any]:
     try:
@@ -199,10 +236,26 @@ def _extract_openai_json_content(response_payload: dict[str, Any]) -> dict[str, 
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ModelProviderError(f"LM Studio message content is not valid JSON: {exc}") from exc
+        parsed = _extract_first_json_object(content)
+        if parsed is None:
+            raise ModelProviderError(f"LM Studio message content is not valid JSON: {exc}") from exc
     if not isinstance(parsed, dict):
         raise ModelProviderError("LM Studio message JSON must be an object")
     return parsed
+
+
+def _extract_first_json_object(content: str) -> dict[str, Any] | None:
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(content):
+        if character != "{":
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(content[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
 
 
 def _parse_model_suggestions(raw: dict[str, Any]) -> tuple[ModelAssetSuggestion, ...]:

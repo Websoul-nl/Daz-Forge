@@ -7,6 +7,7 @@ import pytest
 
 from forge.pose_converter.converter import convert_g8f_pose_to_g9
 from forge.pose_converter.duf import load_duf, save_duf
+from forge.pose_converter.product import convert_pose_product
 
 
 SAMPLES = Path("D:/Software projects/daz-forge/.codex-local/dim-samples")
@@ -73,6 +74,63 @@ def test_convert_road_trip_01_writes_lean_pose_without_default_clutter() -> None
         for animation in animations
     )
     assert "lSmallToe4_2" in result.unmapped_bones
+
+
+def test_convert_pose_product_zip_writes_g9_output_folder_and_report(tmp_path: Path) -> None:
+    _require_road_trip_samples()
+    output_dir = tmp_path / "converted"
+
+    report = convert_pose_product(ROAD_TRIP_ZIP, output_dir)
+
+    converted_pose = (
+        output_dir
+        / "Content"
+        / "People"
+        / "Genesis 9"
+        / "Poses"
+        / "Road Trip Poses for Genesis 9"
+        / "Road Trip 01.duf"
+    )
+    converted_thumbnail = converted_pose.with_suffix(".duf.png")
+    converted_tip = converted_pose.with_name("Road Trip 01.tip.png")
+    report_path = output_dir / "pose_conversion_report.json"
+
+    assert report.converted_count == 24
+    assert report.skipped_count == 0
+    assert converted_pose.exists()
+    assert converted_thumbnail.exists()
+    assert converted_tip.exists()
+    assert report_path.exists()
+    assert load_duf(converted_pose)["asset_info"]["type"] == "preset_pose"
+    assert "Genesis%209" in load_duf(converted_pose)["asset_info"]["id"]
+
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report_payload["converted_count"] == 24
+    assert report_payload["outputs"][0]["source_path"].endswith("Road Trip 01.duf")
+    assert "People/Genesis 9/Poses/Road Trip Poses for Genesis 9/Road Trip 01.duf" in {
+        item["output_path"] for item in report_payload["outputs"]
+    }
+
+
+def test_convert_pose_product_folder_source(tmp_path: Path) -> None:
+    _require_road_trip_samples()
+    source_dir = tmp_path / "source"
+    output_dir = tmp_path / "converted"
+    with ZipFile(ROAD_TRIP_ZIP) as archive:
+        archive.extractall(source_dir)
+
+    report = convert_pose_product(source_dir, output_dir)
+
+    assert report.converted_count == 24
+    assert (
+        output_dir
+        / "Content"
+        / "People"
+        / "Genesis 9"
+        / "Poses"
+        / "Road Trip Poses for Genesis 9"
+        / "Road Trip 24.duf"
+    ).exists()
 
 
 def _require_road_trip_samples() -> None:

@@ -8,6 +8,10 @@ from typing import Any
 
 def load_duf(path: Path) -> dict[str, Any]:
     data = path.read_bytes()
+    return loads_duf(data)
+
+
+def loads_duf(data: bytes) -> dict[str, Any]:
     if _is_gzip(data):
         data = gzip.decompress(data)
     return json.loads(data.decode("utf-8"))

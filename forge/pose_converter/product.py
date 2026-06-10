@@ -3,9 +3,17 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
+import re
+import shutil
 from urllib.parse import quote
+from uuid import uuid4
 from zipfile import ZipFile, is_zipfile
 
+from forge.analyzer.inference import infer_metadata
+from forge.analyzer.inventory import classify_inventory
+from forge.analyzer.review_contract import build_review_contract, contract_to_dict
+from forge.analyzer.source import scan_source
+from forge.packager.dim import DimPackageResult, build_dim_package
 from forge.pose_converter.converter import convert_g8f_pose_to_g9
 from forge.pose_converter.duf import loads_duf, save_duf
 
@@ -31,9 +39,42 @@ class PoseProductReport:
 
 
 @dataclass(frozen=True)
+class ConvertedPoseDimPackageResult:
+    converted_folder: Path
+    conversion_report: PoseProductReport
+    package: DimPackageResult
+
+
+@dataclass(frozen=True)
 class _SourceFile:
     content_path: str
     data: bytes
+
+
+def build_converted_pose_dim_package(
+    source: Path,
+    output_dir: Path,
+    *,
+    metadata: dict | None = None,
+) -> ConvertedPoseDimPackageResult:
+    source = Path(source)
+    output_dir = Path(output_dir)
+    converted_folder = _converted_staging_folder(source, output_dir)
+    _reset_converted_folder(converted_folder, output_dir)
+
+    conversion_report = convert_pose_product(source, converted_folder)
+    scan = scan_source(converted_folder)
+    inventory = classify_inventory(scan)
+    inference = infer_metadata(scan, inventory)
+    contract = contract_to_dict(build_review_contract(scan, inventory, inference))
+    contract["product"].update(_package_metadata(source, conversion_report, metadata or {}))
+    package = build_dim_package(scan, contract, output_dir)
+
+    return ConvertedPoseDimPackageResult(
+        converted_folder=converted_folder,
+        conversion_report=conversion_report,
+        package=package,
+    )
 
 
 def convert_pose_product(source: Path, output_dir: Path) -> PoseProductReport:
@@ -100,6 +141,73 @@ def _read_source_files(source: Path) -> list[_SourceFile]:
     if source.is_dir():
         return _read_folder_source(source)
     raise ValueError(f"Source must be a zip file or folder: {source}")
+
+
+def _converted_staging_folder(source: Path, output_dir: Path) -> Path:
+    return output_dir / "_pose_converter_staging" / _safe_stem(source)
+
+
+def _reset_converted_folder(converted_folder: Path, output_dir: Path) -> None:
+    staging_root = (output_dir / "_pose_converter_staging").resolve()
+    resolved = converted_folder.resolve()
+    if staging_root != resolved and staging_root not in resolved.parents:
+        raise ValueError(f"Refusing to reset folder outside pose converter staging: {converted_folder}")
+    if converted_folder.exists():
+        shutil.rmtree(converted_folder)
+    converted_folder.mkdir(parents=True, exist_ok=True)
+
+
+def _package_metadata(
+    source: Path,
+    report: PoseProductReport,
+    metadata: dict,
+) -> dict:
+    product_name = str(metadata.get("product_name") or _converted_product_name(source, report))
+    artists = _metadata_list(metadata.get("artists"))
+    primary_artist = str(metadata.get("primary_artist") or (artists[0] if artists else ""))
+    store_display_name = str(metadata.get("store_display_name") or "")
+    store_id = str(metadata.get("store_id") or store_display_name)
+    return {
+        "product_name": product_name,
+        "store_display_name": store_display_name,
+        "store_id": store_id,
+        "store_prefix": str(metadata.get("store_prefix") or ""),
+        "store_code": str(metadata.get("store_code") or ""),
+        "product_token": str(metadata.get("product_token") or "1"),
+        "global_id": str(metadata.get("global_id") or uuid4()),
+        "artists": artists,
+        "primary_artist": primary_artist,
+        "product_image": str(metadata.get("product_image") or ""),
+    }
+
+
+def _converted_product_name(source: Path, report: PoseProductReport) -> str:
+    if report.outputs:
+        parts = PurePosixPath(report.outputs[0].output_path).parts
+        lowered = tuple(part.lower() for part in parts)
+        if "poses" in lowered:
+            index = lowered.index("poses")
+            if len(parts) > index + 1:
+                return parts[index + 1]
+    return _source_name_without_dim_prefix(source).replace("Genesis8Female", "Genesis9")
+
+
+def _source_name_without_dim_prefix(source: Path) -> str:
+    stem = source.stem
+    return re.sub(r"^[A-Z]{0,6}\d{8}-\d{2}_", "", stem)
+
+
+def _safe_stem(source: Path) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", source.stem).strip("._-")
+    return cleaned or "pose-product"
+
+
+def _metadata_list(value) -> list[str]:
+    if isinstance(value, str):
+        return [part.strip() for part in re.split(r"[;,]", value) if part.strip()]
+    if value is None:
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _read_zip_source(source: Path) -> list[_SourceFile]:

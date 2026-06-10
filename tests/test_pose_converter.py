@@ -7,7 +7,7 @@ import pytest
 
 from forge.pose_converter.converter import convert_g8f_pose_to_g9
 from forge.pose_converter.duf import load_duf, save_duf
-from forge.pose_converter.product import convert_pose_product
+from forge.pose_converter.product import build_converted_pose_dim_package, convert_pose_product
 
 
 SAMPLES = Path("D:/Software projects/daz-forge/.codex-local/dim-samples")
@@ -131,6 +131,54 @@ def test_convert_pose_product_folder_source(tmp_path: Path) -> None:
         / "Road Trip Poses for Genesis 9"
         / "Road Trip 24.duf"
     ).exists()
+
+
+def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None:
+    _require_road_trip_samples()
+    output_dir = tmp_path / "packages"
+
+    result = build_converted_pose_dim_package(
+        ROAD_TRIP_ZIP,
+        output_dir,
+        metadata={
+            "product_name": "Road Trip Poses for Genesis 9",
+            "store_display_name": "Websoul",
+            "store_id": "Websoul",
+            "store_prefix": "WEB",
+            "product_token": "24156031",
+            "global_id": "11111111-2222-4333-8444-555555555555",
+            "artists": ["Websoul"],
+            "primary_artist": "Websoul",
+        },
+    )
+
+    assert result.conversion_report.converted_count == 24
+    assert result.package.zip_path.name == "WEB24156031-01_RoadTripPosesforGenesis9.zip"
+    assert result.package.report_path.exists()
+    assert result.converted_folder.exists()
+
+    with ZipFile(result.package.zip_path) as archive:
+        names = set(archive.namelist())
+        converted_pose = (
+            "Content/People/Genesis 9/Poses/"
+            "Road Trip Poses for Genesis 9/Road Trip 01.duf"
+        )
+        assert "Manifest.dsx" in names
+        assert "Supplement.dsx" in names
+        assert converted_pose in names
+        assert (
+            "Content/People/Genesis 8 Female/Poses/"
+            "Road Trip Poses for Genesis 8 Female/Road Trip 01.duf"
+        ) not in names
+        assert "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsx" in names
+
+        support = archive.read(
+            "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsx"
+        ).decode("utf-8")
+        assert '<Product VALUE="Road Trip Poses for Genesis 9">' in support
+        assert f'<Asset VALUE="/{converted_pose.removeprefix("Content/")}">' in support
+        assert '<ContentType VALUE="Preset/Pose"/>' in support
+        assert '<Compatibility VALUE="/Genesis 9/Base"/>' in support
 
 
 def _require_road_trip_samples() -> None:

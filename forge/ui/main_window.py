@@ -7,7 +7,8 @@ import shutil
 from typing import Any, Callable
 from uuid import uuid4
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -121,6 +122,7 @@ class MainWindow(QMainWindow):
         app_settings: AppSettings | None = None,
         store_catalog_path: Path | None = None,
         run_analysis_synchronously: bool = False,
+        output_folder_opener: Callable[[Path], None] | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Daz Forge")
@@ -138,6 +140,7 @@ class MainWindow(QMainWindow):
         self.current_contract: dict[str, Any] = {"rows": [], "warnings": [], "hard_blockers": []}
         self.table_model = ReviewTableModel(self.current_contract)
         self.model_provider_factory = model_provider_factory or self._default_model_provider_factory
+        self.output_folder_opener = output_folder_opener or _open_folder_with_desktop
         self.available_model_providers = (
             available_model_providers
             if available_model_providers is not None
@@ -174,6 +177,8 @@ class MainWindow(QMainWindow):
         self.model_name_edit.setMinimumWidth(220)
         self.ask_model_button = QPushButton("Ask Model")
         self.build_package_button = QPushButton("Build Package")
+        self.build_package_button.setObjectName("primaryBuildPackageButton")
+        self.go_to_output_folder_button = QPushButton("Go to Output Folder")
         self.use_support_button = QPushButton("Use Support")
         self.mark_row_reviewed_button = QPushButton("Mark Row Reviewed")
         self.mark_issue_reviewed_button = QPushButton("Mark Issue Reviewed")
@@ -334,20 +339,23 @@ class MainWindow(QMainWindow):
 
         self.detail_view.setMinimumWidth(340)
         detail_container = QWidget()
-        detail_layout = QVBoxLayout(detail_container)
-        detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.setSpacing(8)
+        self.detail_layout = QVBoxLayout(detail_container)
+        self.detail_layout.setContentsMargins(0, 0, 0, 0)
+        self.detail_layout.setSpacing(8)
         model_bar = QHBoxLayout()
         model_bar.addWidget(self.provider_combo)
         model_bar.addWidget(self.model_name_edit, 1)
         model_bar.addWidget(self.ask_model_button)
-        detail_layout.addLayout(model_bar)
-        action_bar = QHBoxLayout()
-        action_bar.addWidget(self.build_package_button)
-        action_bar.addWidget(self.use_support_button)
-        action_bar.addWidget(self.mark_row_reviewed_button)
-        detail_layout.addLayout(action_bar)
-        detail_layout.addWidget(self.detail_view, 1)
+        self.detail_layout.addLayout(model_bar)
+        row_action_bar = QHBoxLayout()
+        row_action_bar.addWidget(self.use_support_button)
+        row_action_bar.addWidget(self.mark_row_reviewed_button)
+        self.detail_layout.addLayout(row_action_bar)
+        self.detail_layout.addWidget(self.detail_view, 1)
+        self.package_action_bar = QHBoxLayout()
+        self.package_action_bar.addWidget(self.go_to_output_folder_button)
+        self.package_action_bar.addWidget(self.build_package_button)
+        self.detail_layout.addLayout(self.package_action_bar)
         review_splitter.addWidget(detail_container)
         review_splitter.setSizes([900, 360])
         splitter.addWidget(review_splitter)
@@ -382,6 +390,7 @@ class MainWindow(QMainWindow):
         self.provider_combo.currentTextChanged.connect(self._provider_changed)
         self.ask_model_button.clicked.connect(self.ask_model_for_current_source)
         self.build_package_button.clicked.connect(self.build_current_package)
+        self.go_to_output_folder_button.clicked.connect(self.open_output_folder)
         self.use_support_button.clicked.connect(self.apply_support_to_selected_row)
         self.mark_row_reviewed_button.clicked.connect(self.mark_selected_row_reviewed)
         self.mark_issue_reviewed_button.clicked.connect(self.mark_selected_issue_reviewed)
@@ -421,6 +430,15 @@ class MainWindow(QMainWindow):
             self._analysis_progress(f"Package build failed: {exc}")
             return
         self._analysis_progress(f"Package built: {result.zip_path}")
+
+    def open_output_folder(self) -> None:
+        source_text = self.source_edit.text().strip()
+        if not source_text:
+            self._set_issue_lines(["No source selected."])
+            return
+        output_folder = self._package_output_folder(Path(source_text))
+        output_folder.mkdir(parents=True, exist_ok=True)
+        self.output_folder_opener(output_folder)
 
     def generate_product_guid(self) -> None:
         self.guid_edit.setText(str(uuid4()))
@@ -631,6 +649,7 @@ class MainWindow(QMainWindow):
         self.browse_button.setEnabled(not analyzing)
         self.provider_combo.setEnabled(not analyzing)
         self.build_package_button.setEnabled(not analyzing)
+        self.go_to_output_folder_button.setEnabled(not analyzing)
         self._update_model_controls()
 
     def _after_warning_resolution(self) -> None:
@@ -841,6 +860,20 @@ class MainWindow(QMainWindow):
             QPushButton:hover {
                 background: #3a3f47;
             }
+            QPushButton#primaryBuildPackageButton {
+                background: #139a7f;
+                border-color: #20c8a7;
+                color: #ffffff;
+                font-weight: 600;
+            }
+            QPushButton#primaryBuildPackageButton:hover {
+                background: #17b597;
+            }
+            QPushButton#primaryBuildPackageButton:disabled {
+                background: #2f4f49;
+                border-color: #45645e;
+                color: #aeb8b5;
+            }
             QTableView, QListWidget, QTextEdit {
                 background: #25262a;
                 alternate-background-color: #2c2d32;
@@ -1038,6 +1071,10 @@ def _split_product_artists(value: str) -> list[str]:
 
 def _default_store_catalog_path() -> Path:
     return Path(__file__).resolve().parents[2] / "config" / "stores.json"
+
+
+def _open_folder_with_desktop(path: Path) -> None:
+    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
 
 def _ready_status(contract: dict[str, Any]) -> str:

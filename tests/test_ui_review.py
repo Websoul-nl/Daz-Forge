@@ -388,6 +388,22 @@ def test_main_window_can_generate_new_product_guid(qapp) -> None:
     assert window.current_contract["product"]["global_id"] == window.guid_edit.text()
 
 
+def test_main_window_package_actions_are_bottom_accent_and_open_output(qapp, tmp_path: Path) -> None:
+    opened = []
+    source = tmp_path / "Hero Product"
+    source.mkdir()
+    window = MainWindow(available_model_providers=(), output_folder_opener=opened.append)
+    window.set_source_path(source)
+
+    assert window.build_package_button.objectName() == "primaryBuildPackageButton"
+    assert window.go_to_output_folder_button.text() == "Go to Output Folder"
+    assert window.detail_layout.itemAt(window.detail_layout.count() - 1).layout() is window.package_action_bar
+
+    window.open_output_folder()
+
+    assert opened == [tmp_path / "Daz Forge Packages"]
+
+
 def test_main_window_prefills_product_metadata_from_support_file(qapp, tmp_path: Path) -> None:
     write_file(tmp_path / "Props" / "Sadriel" / "Jewelry.duf", dson("scene_subset", author="Sadriel"))
     write_file(

@@ -1,0 +1,371 @@
+// Daz Forge - JCM Gate Repair
+//
+// Purpose:
+//   Add one character body morph as a multiply/ERC gate for that same
+//   character's JCM/CBS morphs on the selected figure.
+//
+// Usage:
+//   1. Load the character in Daz Studio.
+//   2. Select the figure in the Scene pane.
+//   3. Set CHARACTER_MATCH and JCM_MATCH below if needed.
+//   4. Run once with APPLY_CHANGES = false and inspect the preview.
+//   5. Set APPLY_CHANGES = true, run again, then use:
+//      File > Save As > Support Asset > Save Modified Assets
+//      Select only the changed character morph assets.
+
+var CHARACTER_MATCH = "Beverly";
+var JCM_MATCH = "Beverly";
+var APPLY_CHANGES = false;
+var ALLOW_FALLBACK_GATE = false;
+var MAX_PREVIEW_LINES = 80;
+
+function textOf( value ) {
+	if( value == undefined || value == null ){
+		return "";
+	}
+
+	return String( value );
+}
+
+function lower( value ) {
+	return textOf( value ).toLowerCase();
+}
+
+function propertyName( prop ) {
+	var names = [];
+
+	try {
+		names.push( textOf( prop.name ) );
+	} catch( e1 ) {}
+
+	try {
+		names.push( textOf( prop.getName() ) );
+	} catch( e2 ) {}
+
+	try {
+		names.push( textOf( prop.getLabel() ) );
+	} catch( e3 ) {}
+
+	try {
+		names.push( textOf( prop.label ) );
+	} catch( e4 ) {}
+
+	try {
+		names.push( textOf( prop.getPath() ) );
+	} catch( e5 ) {}
+
+	try {
+		names.push( textOf( prop.assetUri ) );
+	} catch( e6 ) {}
+
+	return names.join( " | " );
+}
+
+function displayName( prop ) {
+	var label = "";
+	var name = "";
+
+	try {
+		label = textOf( prop.getLabel() );
+	} catch( e1 ) {}
+
+	try {
+		name = textOf( prop.getName() );
+	} catch( e2 ) {}
+
+	if( label.length > 0 ){
+		return label;
+	}
+
+	if( name.length > 0 ){
+		return name;
+	}
+
+	return propertyName( prop );
+}
+
+function isNumericProperty( prop ) {
+	if( !prop ){
+		return false;
+	}
+
+	try {
+		return prop.inherits( "DzNumericProperty" );
+	} catch( e ) {
+		return false;
+	}
+}
+
+function getAllProperties( element ) {
+	try {
+		return element.getPropertyList();
+	} catch( e ) {
+		return [];
+	}
+}
+
+function getPropertyAt( list, index ) {
+	try {
+		if( list.at ){
+			return list.at( index );
+		}
+	} catch( e1 ) {}
+
+	try {
+		return list[index];
+	} catch( e2 ) {
+		return null;
+	}
+}
+
+function getListLength( list ) {
+	try {
+		if( list.length != undefined ){
+			return list.length;
+		}
+	} catch( e1 ) {}
+
+	try {
+		if( list.count ){
+			return list.count();
+		}
+	} catch( e2 ) {}
+
+	try {
+		if( list.size ){
+			return list.size();
+		}
+	} catch( e3 ) {}
+
+	return 0;
+}
+
+function looksLikeCharacterBody( prop, matchText ) {
+	var haystack = lower( propertyName( prop ) );
+	var needle = lower( matchText );
+
+	if( haystack.indexOf( needle ) < 0 ){
+		return false;
+	}
+
+	return (
+		haystack.indexOf( "body" ) >= 0 ||
+		haystack.indexOf( "character" ) >= 0 ||
+		haystack.indexOf( "actor" ) >= 0
+	);
+}
+
+function looksLikeJcmOrCbs( prop, matchText ) {
+	var haystack = lower( propertyName( prop ) );
+	var needle = lower( matchText );
+
+	if( haystack.indexOf( needle ) < 0 ){
+		return false;
+	}
+
+	return (
+		haystack.indexOf( "jcm" ) >= 0 ||
+		haystack.indexOf( "cbs" ) >= 0 ||
+		haystack.indexOf( "pjcm" ) >= 0 ||
+		haystack.indexOf( "ejcm" ) >= 0 ||
+		haystack.indexOf( "fbm" ) >= 0 && haystack.indexOf( "ctrl" ) >= 0
+	);
+}
+
+function findGateProperty( props, matchText ) {
+	var fallback = null;
+	var count = getListLength( props );
+
+	for( var i = 0; i < count; i++ ){
+		var prop = getPropertyAt( props, i );
+
+		if( !isNumericProperty( prop ) ){
+			continue;
+		}
+
+		var haystack = lower( propertyName( prop ) );
+		if( haystack.indexOf( lower( matchText ) ) < 0 ){
+			continue;
+		}
+
+		if( !fallback ){
+			fallback = prop;
+		}
+
+		if( looksLikeCharacterBody( prop, matchText ) ){
+			return prop;
+		}
+	}
+
+	if( ALLOW_FALLBACK_GATE ){
+		return fallback;
+	}
+
+	return null;
+}
+
+function controllerUsesGate( controller, gateProp ) {
+	if( !controller || !gateProp ){
+		return false;
+	}
+
+	try {
+		if( controller.getProperty && controller.getProperty() == gateProp ){
+			return true;
+		}
+	} catch( e1 ) {}
+
+	try {
+		if( controller.getCurrentProperty && controller.getCurrentProperty() == gateProp ){
+			return true;
+		}
+	} catch( e2 ) {}
+
+	return false;
+}
+
+function alreadyHasGate( prop, gateProp ) {
+	var count = 0;
+
+	try {
+		count = prop.getNumControllers();
+	} catch( e1 ) {
+		return false;
+	}
+
+	for( var i = 0; i < count; i++ ){
+		try {
+			if( controllerUsesGate( prop.getController( i ), gateProp ) ){
+				return true;
+			}
+		} catch( e2 ) {}
+	}
+
+	return false;
+}
+
+function addMultiplyGate( prop, gateProp ) {
+	if( alreadyHasGate( prop, gateProp ) ){
+		return false;
+	}
+
+	if( DzERCLink.testCircularLink && DzERCLink.testCircularLink( gateProp, prop ) ){
+		throw "Circular ERC link rejected for " + displayName( prop );
+	}
+
+	var link = new DzERCLink( DzERCLink.ERCMultiply, gateProp, 1.0, 0.0 );
+	link.setSaveWithOutput( true );
+	return prop.insertController( link );
+}
+
+function summarize( title, lines ) {
+	var message = title + "\n\n" + lines.join( "\n" );
+
+	if( MessageBox && MessageBox.information ){
+		MessageBox.information( message, "Daz Forge JCM Gate Repair", "&OK" );
+	} else {
+		print( message );
+	}
+}
+
+function main() {
+	var figure = Scene.getPrimarySelection();
+
+	if( !figure ){
+		summarize( "No selected figure.", [
+			"Load the character, select the figure in the Scene pane, then run again."
+		] );
+		return;
+	}
+
+	var props = getAllProperties( figure );
+	var propCount = getListLength( props );
+	var gateProp = findGateProperty( props, CHARACTER_MATCH );
+
+	if( !gateProp ){
+		summarize( "No character gate property found.", [
+			"Selected item: " + textOf( figure.name ),
+			"Character match: " + CHARACTER_MATCH,
+			"Properties scanned: " + propCount
+		] );
+		return;
+	}
+
+	var candidates = [];
+	var already = [];
+	var changed = [];
+	var failed = [];
+
+	for( var i = 0; i < propCount; i++ ){
+		var prop = getPropertyAt( props, i );
+
+		if( !isNumericProperty( prop ) || prop == gateProp ){
+			continue;
+		}
+
+		if( !looksLikeJcmOrCbs( prop, JCM_MATCH ) ){
+			continue;
+		}
+
+		if( alreadyHasGate( prop, gateProp ) ){
+			already.push( prop );
+			continue;
+		}
+
+		candidates.push( prop );
+
+		if( APPLY_CHANGES ){
+			try {
+				if( addMultiplyGate( prop, gateProp ) ){
+					changed.push( prop );
+				} else {
+					failed.push( displayName( prop ) + " - insertController returned false" );
+				}
+			} catch( err ) {
+				failed.push( displayName( prop ) + " - " + textOf( err ) );
+			}
+		}
+	}
+
+	var lines = [];
+	lines.push( "Selected item: " + textOf( figure.name ) );
+	lines.push( "Gate property: " + displayName( gateProp ) );
+	lines.push( "Character match: " + CHARACTER_MATCH );
+	lines.push( "JCM/CBS match: " + JCM_MATCH );
+	lines.push( "Properties scanned: " + propCount );
+	lines.push( "Already gated: " + already.length );
+	lines.push( "Needs gate: " + candidates.length );
+	lines.push( "Changed: " + changed.length );
+	lines.push( "Failed: " + failed.length );
+	lines.push( "" );
+
+	if( !APPLY_CHANGES ){
+		lines.push( "Preview only is ON. Set APPLY_CHANGES = true at the top of this script to write changes." );
+	} else {
+		lines.push( "Changes were applied in memory only." );
+		lines.push( "Use Save Modified Assets and select only the changed character morph assets." );
+	}
+
+	lines.push( "" );
+	lines.push( "Candidates:" );
+
+	for( var c = 0; c < candidates.length && c < MAX_PREVIEW_LINES; c++ ){
+		lines.push( "  - " + displayName( candidates[c] ) );
+	}
+
+	if( candidates.length > MAX_PREVIEW_LINES ){
+		lines.push( "  ... " + ( candidates.length - MAX_PREVIEW_LINES ) + " more" );
+	}
+
+	if( failed.length > 0 ){
+		lines.push( "" );
+		lines.push( "Failures:" );
+		for( var f = 0; f < failed.length; f++ ){
+			lines.push( "  - " + failed[f] );
+		}
+	}
+
+	summarize( "JCM Gate Repair complete.", lines );
+}
+
+main();

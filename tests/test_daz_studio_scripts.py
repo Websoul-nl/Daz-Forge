@@ -16,9 +16,21 @@ def test_jcm_gate_repair_defaults_to_preview_and_selected_figure_only() -> None:
     script = _script_text()
 
     assert "Scene.getPrimarySelection()" in script
+    assert 'var CHARACTER_MATCH = ""' in script
+    assert 'var JCM_MATCH = ""' in script
     assert "var APPLY_CHANGES = false" in script
     assert "var ALLOW_FALLBACK_GATE = false" in script
     assert "Preview only is ON" in script
+
+
+def test_jcm_gate_repair_can_auto_detect_active_character_gate() -> None:
+    script = _script_text()
+
+    assert "AUTO_DETECT_ACTIVE_CHARACTER = true" in script
+    assert "findActiveCharacterGateProperty" in script
+    assert "currentValueIsDefaultValue" in script
+    assert "getValueAsDouble" in script
+    assert "deriveMatchTextFromGate" in script
 
 
 def test_jcm_gate_repair_adds_multiply_erc_without_auto_saving_assets() -> None:

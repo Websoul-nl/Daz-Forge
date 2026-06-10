@@ -148,6 +148,22 @@ def test_main_window_wraps_packager_in_first_tab(qapp) -> None:
     assert _has_ancestor(window.build_package_button, window.dim_packager_page)
 
 
+def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+    page = window.dim_packager_page
+
+    assert page.inspector_tabs.count() == 2
+    assert page.inspector_tabs.tabText(0) == "Product"
+    assert page.inspector_tabs.tabText(1) == "Selected File"
+    assert _has_ancestor(window.product_name_edit, page.product_tab)
+    assert _has_ancestor(window.store_combo, page.product_tab)
+    assert _has_ancestor(window.detail_view, page.selected_file_tab)
+    assert _has_ancestor(window.ask_model_button, page.selected_file_tab)
+    assert _has_ancestor(window.source_edit, page.source_toolbar)
+    assert _has_ancestor(window.analyze_button, page.source_toolbar)
+    assert page.footer_layout.itemAt(page.footer_layout.count() - 1).layout() is page.package_action_bar
+
+
 def _has_ancestor(widget: QWidget, ancestor: QWidget) -> bool:
     current: QWidget | None = widget
     while current is not None:
@@ -418,7 +434,9 @@ def test_main_window_package_actions_are_bottom_accent_and_open_output(qapp, tmp
 
     assert window.build_package_button.objectName() == "primaryBuildPackageButton"
     assert window.go_to_output_folder_button.text() == "Go to Output Folder"
-    assert window.detail_layout.itemAt(window.detail_layout.count() - 1).layout() is window.package_action_bar
+    assert window.dim_packager_page.footer_layout.itemAt(
+        window.dim_packager_page.footer_layout.count() - 1
+    ).layout() is window.package_action_bar
 
     window.open_output_folder()
 
@@ -492,12 +510,14 @@ def test_main_window_busy_state_disables_analysis_controls(qapp) -> None:
 
     assert window.browse_button.isEnabled() is False
     assert window.source_edit.isEnabled() is False
+    assert window.analyze_button.isEnabled() is False
     assert window.ask_model_button.isEnabled() is False
 
     window._set_analyzing(False)
 
     assert window.browse_button.isEnabled() is True
     assert window.source_edit.isEnabled() is True
+    assert window.analyze_button.isEnabled() is True
     assert window.ask_model_button.isEnabled() is True
 
 
@@ -567,10 +587,10 @@ def test_main_window_can_ask_configured_model_provider(qapp, tmp_path: Path) -> 
     assert captured["contract"]["rows"][0]["model"]["reason"] == "Script path is a utility."
 
 
-def test_main_window_has_ask_model_instead_of_top_analyze(qapp) -> None:
+def test_main_window_has_source_analyze_and_ask_model_actions(qapp) -> None:
     window = MainWindow(available_model_providers=("ollama",))
 
-    assert not hasattr(window, "analyze_button")
+    assert window.analyze_button.text() == "Analyze"
     assert window.ask_model_button.text() == "Ask Model"
 
 

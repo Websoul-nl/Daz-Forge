@@ -149,6 +149,7 @@ class MainWindow(QMainWindow):
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Select a product folder or zip")
         self.browse_button = QPushButton("Browse")
+        self.analyze_button = QPushButton("Analyze")
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter rows")
         self.warnings_only_checkbox = QCheckBox("Warnings only")
@@ -302,6 +303,7 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.browse_button.clicked.connect(self._browse_source)
+        self.analyze_button.clicked.connect(self.analyze_current_source)
         self.source_edit.returnPressed.connect(self.analyze_current_source)
         for product_field in (
             self.product_name_edit,
@@ -576,6 +578,7 @@ class MainWindow(QMainWindow):
         self._analyzing = analyzing
         self.source_edit.setEnabled(not analyzing)
         self.browse_button.setEnabled(not analyzing)
+        self.analyze_button.setEnabled(not analyzing)
         self.provider_combo.setEnabled(not analyzing)
         self.build_package_button.setEnabled(not analyzing)
         self.go_to_output_folder_button.setEnabled(not analyzing)

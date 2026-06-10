@@ -18,6 +18,7 @@ from forge.ui.main_window import AnalysisWorker, MainWindow
 from forge.ui.main_window import analyze_source
 from forge.ui.main_window import _apply_model_suggestion_diffs, _model_suggestion_diffs
 from forge.ui.delegates import CompactLineEditDelegate, SearchableComboDelegate
+from forge.ui.pages.dim_packager_page import DimPackagerPage
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -141,6 +142,7 @@ def test_main_window_wraps_packager_in_first_tab(qapp) -> None:
 
     assert window.tabs.count() >= 1
     assert window.tabs.tabText(0) == "DIM Packager"
+    assert isinstance(window.dim_packager_page, DimPackagerPage)
     assert window.tabs.widget(0) is window.dim_packager_page
     assert _has_ancestor(window.source_edit, window.dim_packager_page)
     assert _has_ancestor(window.build_package_button, window.dim_packager_page)

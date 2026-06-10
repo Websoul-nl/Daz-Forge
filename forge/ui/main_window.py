@@ -15,15 +15,12 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
     QPushButton,
-    QSizePolicy,
-    QSplitter,
     QTableView,
     QTabWidget,
     QTextEdit,
@@ -48,6 +45,7 @@ from forge.analyzer.source import SourceScan, scan_source
 from forge.packager.dim import build_dim_package
 from forge.settings import AppSettings, StoreSettings, load_store_catalog, upsert_store
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
+from forge.ui.pages.dim_packager_page import DimPackagerPage
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -297,83 +295,10 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
-        self.dim_packager_page = QWidget()
+        self.dim_packager_page = DimPackagerPage(self)
+        self.detail_layout = self.dim_packager_page.detail_layout
+        self.package_action_bar = self.dim_packager_page.package_action_bar
         self.tabs.addTab(self.dim_packager_page, "DIM Packager")
-        layout = QVBoxLayout(self.dim_packager_page)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
-
-        source_bar = QHBoxLayout()
-        source_bar.addWidget(self.source_edit, 1)
-        source_bar.addWidget(self.browse_button)
-        layout.addLayout(source_bar)
-
-        layout.addWidget(self.summary_label)
-
-        product_bar = QHBoxLayout()
-        product_bar.addWidget(QLabel("Product"))
-        product_bar.addWidget(self.product_name_edit, 2)
-        product_bar.addWidget(QLabel("Store"))
-        product_bar.addWidget(self.store_combo, 1)
-        product_bar.addWidget(QLabel("Prefix"))
-        product_bar.addWidget(self.store_prefix_edit)
-        product_bar.addWidget(QLabel("Code"))
-        product_bar.addWidget(self.store_code_edit)
-        product_bar.addWidget(QLabel("Token"))
-        product_bar.addWidget(self.token_edit)
-        product_bar.addWidget(QLabel("GUID"))
-        product_bar.addWidget(self.guid_edit, 2)
-        product_bar.addWidget(self.generate_guid_button)
-        product_bar.addWidget(QLabel("Artists"))
-        product_bar.addWidget(self.artists_edit, 2)
-        layout.addLayout(product_bar)
-
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        review_splitter = QSplitter(Qt.Orientation.Horizontal)
-        grid_container = QWidget()
-        grid_layout = QVBoxLayout(grid_container)
-        grid_layout.setContentsMargins(0, 0, 0, 0)
-        grid_layout.setSpacing(8)
-        filter_bar = QHBoxLayout()
-        filter_bar.addWidget(self.filter_edit, 1)
-        filter_bar.addWidget(self.warnings_only_checkbox)
-        grid_layout.addLayout(filter_bar)
-        grid_layout.addWidget(self.table_view, 1)
-        review_splitter.addWidget(grid_container)
-
-        self.detail_view.setMinimumWidth(340)
-        detail_container = QWidget()
-        self.detail_layout = QVBoxLayout(detail_container)
-        self.detail_layout.setContentsMargins(0, 0, 0, 0)
-        self.detail_layout.setSpacing(8)
-        model_bar = QHBoxLayout()
-        model_bar.addWidget(self.provider_combo)
-        model_bar.addWidget(self.model_name_edit, 1)
-        model_bar.addWidget(self.ask_model_button)
-        self.detail_layout.addLayout(model_bar)
-        row_action_bar = QHBoxLayout()
-        row_action_bar.addWidget(self.use_support_button)
-        row_action_bar.addWidget(self.mark_row_reviewed_button)
-        self.detail_layout.addLayout(row_action_bar)
-        self.detail_layout.addWidget(self.detail_view, 1)
-        self.package_action_bar = QHBoxLayout()
-        self.package_action_bar.addWidget(self.go_to_output_folder_button)
-        self.package_action_bar.addWidget(self.build_package_button)
-        self.detail_layout.addLayout(self.package_action_bar)
-        review_splitter.addWidget(detail_container)
-        review_splitter.setSizes([900, 360])
-        splitter.addWidget(review_splitter)
-        self.issue_list.setMinimumHeight(120)
-        self.issue_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        issue_container = QWidget()
-        issue_layout = QVBoxLayout(issue_container)
-        issue_layout.setContentsMargins(0, 0, 0, 0)
-        issue_layout.setSpacing(8)
-        issue_layout.addWidget(self.issue_list)
-        issue_layout.addWidget(self.mark_issue_reviewed_button)
-        splitter.addWidget(issue_container)
-        splitter.setSizes([560, 140])
-        layout.addWidget(splitter, 1)
 
     def _connect_signals(self) -> None:
         self.browse_button.clicked.connect(self._browse_source)

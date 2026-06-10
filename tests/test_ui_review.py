@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from forge.analyzer.inference import infer_metadata
 from forge.analyzer.inventory import classify_inventory
@@ -134,6 +134,25 @@ def manual_payload() -> dict:
             },
         ],
     }
+
+
+def test_main_window_wraps_packager_in_first_tab(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+
+    assert window.tabs.count() >= 1
+    assert window.tabs.tabText(0) == "DIM Packager"
+    assert window.tabs.widget(0) is window.dim_packager_page
+    assert _has_ancestor(window.source_edit, window.dim_packager_page)
+    assert _has_ancestor(window.build_package_button, window.dim_packager_page)
+
+
+def _has_ancestor(widget: QWidget, ancestor: QWidget) -> bool:
+    current: QWidget | None = widget
+    while current is not None:
+        if current is ancestor:
+            return True
+        current = current.parentWidget()
+    return False
 
 
 def test_table_model_exposes_review_rows_and_headers(tmp_path: Path) -> None:

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QTableView,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -293,9 +294,12 @@ class MainWindow(QMainWindow):
             self.analyze_current_source()
 
     def _build_layout(self) -> None:
-        root = QWidget()
-        self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+
+        self.dim_packager_page = QWidget()
+        self.tabs.addTab(self.dim_packager_page, "DIM Packager")
+        layout = QVBoxLayout(self.dim_packager_page)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
@@ -896,6 +900,26 @@ class MainWindow(QMainWindow):
             QLabel {
                 color: #d7dadf;
                 padding: 2px 0;
+            }
+            QTabWidget::pane {
+                border: 1px solid #3f4249;
+                border-radius: 6px;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background: #2a2d33;
+                border: 1px solid #3f4249;
+                border-bottom: 0;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                color: #c9cdd4;
+                padding: 8px 18px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #202124;
+                color: #ffffff;
+                border-color: #4e535c;
             }
             """
         )

@@ -91,6 +91,9 @@ class ModelSuggestionDialog(QDialog):
             item = QListWidgetItem(_model_diff_label(diff))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
+            if _is_blocked_model_diff(diff):
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                item.setToolTip("; ".join(diff.get("risk_reasons", [])))
             item.setData(Qt.ItemDataRole.UserRole, diff)
             self.diff_list.addItem(item)
 
@@ -950,14 +953,81 @@ def _model_suggestion_diffs(
                 continue
             if current_value != suggested_value:
                 diffs.append(
-                    {
-                        "path": path,
-                        "field": field,
-                        "current": current_value,
-                        "suggested": suggested_value,
-                    }
+                    _harden_model_diff(
+                        {
+                            "path": path,
+                            "field": field,
+                            "current": current_value,
+                            "suggested": suggested_value,
+                        }
+                    )
                 )
+
     return diffs
+
+
+def _harden_model_diff(diff: dict[str, Any]) -> dict[str, Any]:
+    reasons = _model_diff_risk_reasons(diff)
+    if reasons:
+        return {
+            **diff,
+            "risk": "blocked",
+            "risk_reasons": reasons,
+        }
+    return diff
+
+
+def _model_diff_risk_reasons(diff: dict[str, Any]) -> list[str]:
+    path = str(diff.get("path", "")).lower().replace("\\", "/")
+    field = str(diff.get("field", ""))
+    current = diff.get("current")
+    suggested = diff.get("suggested")
+    reasons: list[str] = []
+    if field == "categories":
+        suggested_categories = _lower_list(suggested)
+        if _path_contains_segment(path, "clothing") and any(
+            category.startswith("/default/scenes") for category in suggested_categories
+        ):
+            reasons.append("category conflicts with clothing path")
+        if _path_contains_segment(path, "materials") and any(
+            category.startswith("/default/shaders") for category in suggested_categories
+        ):
+            reasons.append("category conflicts with materials path")
+    if field == "compatibility_base":
+        current_text = str(current or "").strip()
+        suggested_text = str(suggested or "").strip()
+        if not current_text and suggested_text:
+            reasons.append("model added compatibility base")
+        elif (
+            current_text
+            and suggested_text
+            and current_text != suggested_text
+            and _normalize_compatibility_base(current_text) == _normalize_compatibility_base(suggested_text)
+        ):
+            reasons.append("model shortened compatibility base")
+    return reasons
+
+
+def _path_contains_segment(path: str, segment: str) -> bool:
+    return f"/{segment}/" in f"/{path}/"
+
+
+def _lower_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).lower() for item in value if str(item)]
+    text = str(value or "")
+    return [text.lower()] if text else []
+
+
+def _normalize_compatibility_base(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    if normalized.lower().endswith("/base"):
+        normalized = normalized[:-5]
+    return normalized.lower()
+
+
+def _is_blocked_model_diff(diff: dict[str, Any]) -> bool:
+    return diff.get("risk") == "blocked"
 
 
 def _apply_model_suggestion_diffs(
@@ -970,6 +1040,8 @@ def _apply_model_suggestion_diffs(
         for row in updated.get("rows", [])
     }
     for diff in diffs:
+        if _is_blocked_model_diff(diff):
+            continue
         row = rows_by_path.get(diff.get("path", ""))
         if row is None:
             continue
@@ -994,8 +1066,11 @@ def _has_suggestion_value(value: Any) -> bool:
 
 
 def _model_diff_label(diff: dict[str, Any]) -> str:
+    prefix = ""
+    if _is_blocked_model_diff(diff):
+        prefix = f"BLOCKED ({'; '.join(diff.get('risk_reasons', []))}) | "
     return (
-        f"{diff.get('path', '')} | "
+        f"{prefix}{diff.get('path', '')} | "
         f"{_field_label(str(diff.get('field', '')))}: "
         f"{_display_diff_value(diff.get('current'))} -> {_display_diff_value(diff.get('suggested'))}"
     )

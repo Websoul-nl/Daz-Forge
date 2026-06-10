@@ -16,7 +16,7 @@ from forge.analyzer.review_contract import build_review_contract, contract_to_di
 from forge.analyzer.source import scan_source
 from forge.ui.main_window import AnalysisWorker, MainWindow
 from forge.ui.main_window import analyze_source
-from forge.ui.main_window import _apply_model_suggestion_diffs, _model_suggestion_diffs
+from forge.ui.main_window import _apply_model_suggestion_diffs, _model_diff_label, _model_suggestion_diffs
 from forge.ui.delegates import CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.pages.dim_packager_page import DimPackagerPage
 from forge.ui.review_model import ReviewTableModel
@@ -688,6 +688,114 @@ def test_apply_model_suggestion_diffs_copies_checked_findings_only(tmp_path: Pat
 
     assert updated["rows"][0]["final"]["categories"] == ["/Default/Scripts/Utilities"]
     assert deterministic_payload["rows"][0]["final"]["categories"] == ["/Default/Utilities/Scripts"]
+
+
+def test_model_suggestion_diffs_block_risky_outfit_changes() -> None:
+    deterministic_payload = {
+        "rows": [
+            {
+                "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Darcy Button.duf",
+                "final": {
+                    "categories": ["/Default/Wardrobe"],
+                    "compatibility_base": "",
+                },
+            },
+            {
+                "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Materials/Iray/Darcy !Clear All.duf",
+                "final": {
+                    "categories": ["/Default/Materials"],
+                    "compatibility_base": "",
+                },
+            },
+            {
+                "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Darcy !Simulation Plane.duf",
+                "final": {
+                    "categories": ["/Default/Wardrobe"],
+                    "compatibility_base": "/Genesis 9/Base",
+                },
+            },
+        ]
+    }
+    model_payload = {
+        "rows": [
+            {
+                "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Darcy Button.duf",
+                "model": {
+                    "categories": ["/Default/Scenes"],
+                    "compatibility_base": "/Genesis 9",
+                },
+            },
+            {
+                "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Materials/Iray/Darcy !Clear All.duf",
+                "model": {
+                    "categories": ["/Default/Shaders"],
+                    "compatibility_base": "/Genesis 9",
+                },
+            },
+            {
+                "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Darcy !Simulation Plane.duf",
+                "model": {
+                    "categories": ["/Default/Wardrobe"],
+                    "compatibility_base": "/Genesis 9",
+                },
+            },
+        ]
+    }
+
+    diffs = _model_suggestion_diffs(deterministic_payload, model_payload)
+
+    assert len(diffs) == 5
+    assert {diff["field"] for diff in diffs} == {"categories", "compatibility_base"}
+    assert all(diff["risk"] == "blocked" for diff in diffs)
+    assert {reason for diff in diffs for reason in diff["risk_reasons"]} == {
+        "category conflicts with clothing path",
+        "category conflicts with materials path",
+        "model added compatibility base",
+        "model shortened compatibility base",
+    }
+
+
+def test_apply_model_suggestion_diffs_skips_blocked_findings() -> None:
+    payload = {
+        "rows": [
+            {
+                "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Darcy Button.duf",
+                "final": {
+                    "categories": ["/Default/Wardrobe"],
+                    "compatibility_base": "",
+                },
+            }
+        ]
+    }
+    diffs = [
+        {
+            "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Darcy Button.duf",
+            "field": "categories",
+            "current": ["/Default/Wardrobe"],
+            "suggested": ["/Default/Scenes"],
+            "risk": "blocked",
+            "risk_reasons": ["category conflicts with clothing path"],
+        }
+    ]
+
+    updated = _apply_model_suggestion_diffs(payload, diffs)
+
+    assert updated["rows"][0]["final"]["categories"] == ["/Default/Wardrobe"]
+
+
+def test_model_diff_label_marks_blocked_suggestions() -> None:
+    label = _model_diff_label(
+        {
+            "path": "People/Genesis 9/Clothing/PandyGirl/Darcy Outfit/Darcy Button.duf",
+            "field": "categories",
+            "current": ["/Default/Wardrobe"],
+            "suggested": ["/Default/Scenes"],
+            "risk": "blocked",
+            "risk_reasons": ["category conflicts with clothing path"],
+        }
+    )
+
+    assert label.startswith("BLOCKED (category conflicts with clothing path)")
 
 
 def test_ollama_default_provider_has_timeout_for_background_analysis(qapp) -> None:

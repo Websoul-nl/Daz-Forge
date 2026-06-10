@@ -172,6 +172,9 @@ class MainWindow(QMainWindow):
         self.generate_guid_button = QPushButton("Generate")
         self.artists_edit = QLineEdit()
         self.artists_edit.setPlaceholderText("Artists")
+        self.product_image_path_edit = QLineEdit()
+        self.product_image_path_edit.setPlaceholderText("No product image selected")
+        self.choose_product_image_button = QPushButton("Choose Image")
         self.provider_combo = QComboBox()
         self.provider_combo.addItems(self._provider_labels())
         self.provider_combo.setCurrentText(self._default_provider_label())
@@ -319,6 +322,7 @@ class MainWindow(QMainWindow):
             product_field.textChanged.connect(self._product_metadata_changed)
         self.store_combo.currentTextChanged.connect(self._store_changed)
         self.generate_guid_button.clicked.connect(self.generate_product_guid)
+        self.choose_product_image_button.clicked.connect(self.choose_product_image)
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.warnings_only_checkbox.toggled.connect(self._apply_filter)
         self.provider_combo.currentTextChanged.connect(self._provider_changed)
@@ -376,6 +380,21 @@ class MainWindow(QMainWindow):
 
     def generate_product_guid(self) -> None:
         self.guid_edit.setText(str(uuid4()))
+
+    def choose_product_image(self) -> None:
+        file_name, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Select Product Image",
+            "",
+            "Images (*.jpg *.jpeg *.png)",
+        )
+        if file_name:
+            self.set_product_image_path(Path(file_name))
+
+    def set_product_image_path(self, path: Path) -> None:
+        self._set_product_image_text(str(path))
+        product = self.current_contract.setdefault("product", {})
+        product["product_image"] = self.product_image_path_edit.text().strip()
 
     def ask_model_for_current_source(self) -> None:
         if self._analyzing:
@@ -585,6 +604,7 @@ class MainWindow(QMainWindow):
         self.provider_combo.setEnabled(not analyzing)
         self.build_package_button.setEnabled(not analyzing)
         self.go_to_output_folder_button.setEnabled(not analyzing)
+        self.choose_product_image_button.setEnabled(not analyzing)
         self._update_model_controls()
 
     def _after_warning_resolution(self) -> None:
@@ -630,6 +650,7 @@ class MainWindow(QMainWindow):
             self.token_edit.setText(str(product.get("product_token", "")))
             self.guid_edit.setText(str(product.get("global_id", "")))
             self.artists_edit.setText("; ".join(str(artist) for artist in product.get("artists", []) if str(artist)))
+            self._set_product_image_text(str(product.get("product_image", "")))
         finally:
             self._syncing_product_fields = False
 
@@ -657,9 +678,31 @@ class MainWindow(QMainWindow):
         product["store_code"] = self.store_code_edit.text().strip()
         product["product_token"] = self.token_edit.text().strip()
         product["global_id"] = self.guid_edit.text().strip()
+        product["product_image"] = self.product_image_path_edit.text().strip()
         product["artists"] = artists
         product["primary_artist"] = artists[0] if artists else ""
         self.summary_label.setText(self.summary_text())
+
+    def _set_product_image_text(self, value: str) -> None:
+        self.product_image_path_edit.setText(value)
+        drop_zone = getattr(self, "product_image_drop_zone", None)
+        if drop_zone is not None:
+            drop_zone.set_image_path(self._resolved_product_image_path(value))
+
+    def _resolved_product_image_path(self, value: str) -> Path | None:
+        if not value:
+            return None
+        path = Path(value)
+        if path.is_absolute():
+            return path
+        product = self.current_contract.get("product", {})
+        source_path = product.get("source_path") or self.source_edit.text().strip()
+        if not source_path or product.get("source_kind") == "zip":
+            return None
+        base = Path(str(source_path))
+        content_root = str(product.get("content_root") or "")
+        candidate = base / content_root / value if content_root else base / value
+        return candidate
 
     def _package_output_folder(self, source: Path) -> Path:
         configured = self.app_settings.dim_downloads_folder or self.app_settings.default_output_folder
@@ -831,6 +874,13 @@ class MainWindow(QMainWindow):
             QLabel {
                 color: #d7dadf;
                 padding: 2px 0;
+            }
+            QLabel[imageDropZone="true"] {
+                background: #25262a;
+                border: 1px dashed #555b64;
+                border-radius: 6px;
+                color: #aeb4bd;
+                padding: 16px;
             }
             QTabWidget::pane {
                 border: 1px solid #3f4249;

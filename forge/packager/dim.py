@@ -37,6 +37,7 @@ def build_dim_package(
     report_path = output_folder / f"{package_stem}.report.json"
     support_content_path = f"Runtime/Support/{package_code}_{token}_{_support_product_name(product_name)}.dsx"
     support_archive_path = f"Content/{support_content_path}"
+    support_image_content_path = _support_image_path(support_content_path, str(product.get("product_image") or ""))
 
     file_payloads: dict[str, bytes] = {}
     skipped_support_files: list[str] = []
@@ -49,6 +50,9 @@ def build_dim_package(
 
     support_xml = _support_xml(contract)
     file_payloads[support_archive_path] = support_xml.encode("utf-8")
+    product_image_payload = _product_image_payload(scan, str(product.get("product_image") or ""))
+    if support_image_content_path and product_image_payload is not None:
+        file_payloads[f"Content/{support_image_content_path}"] = product_image_payload
     installed_files = tuple(sorted(file_payloads))
     manifest_xml = _manifest_xml(global_id, installed_files)
     supplement_xml = _supplement_xml(product_name)
@@ -68,6 +72,7 @@ def build_dim_package(
         "product_token": token,
         "global_id": global_id,
         "support_path": support_content_path,
+        "product_image_path": support_image_content_path,
         "installed_files": list(installed_files),
         "skipped_existing_support_files": skipped_support_files,
     }
@@ -140,7 +145,31 @@ def _xml_string(root: ET.Element) -> str:
 
 def _is_existing_support_file(content_path: str) -> bool:
     lower = content_path.lower()
-    return lower.startswith("runtime/support/") and lower.endswith((".dsx", ".dsa", ".jpg"))
+    return lower.startswith("runtime/support/") and lower.endswith((".dsx", ".dsa", ".jpg", ".jpeg", ".png"))
+
+
+def _support_image_path(support_content_path: str, product_image: str) -> str:
+    if not product_image:
+        return ""
+    suffix = PurePosixPath(product_image).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png"}:
+        suffix = ".jpg"
+    return PurePosixPath(support_content_path).with_suffix(suffix).as_posix()
+
+
+def _product_image_payload(scan: SourceScan, product_image: str) -> bytes | None:
+    if not product_image:
+        return None
+    image_path = Path(product_image)
+    if image_path.is_absolute():
+        if image_path.exists():
+            return image_path.read_bytes()
+        return None
+    normalized = PurePosixPath(product_image).as_posix().lower()
+    for source_file in scan.files:
+        if source_file.content_path.lower() == normalized:
+            return read_source_file(scan, source_file)
+    return None
 
 
 def _values(value) -> list[str]:

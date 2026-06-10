@@ -152,11 +152,14 @@ def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> No
     window = MainWindow(available_model_providers=())
     page = window.dim_packager_page
 
-    assert page.inspector_tabs.count() == 2
+    assert page.inspector_tabs.count() == 3
     assert page.inspector_tabs.tabText(0) == "Product"
-    assert page.inspector_tabs.tabText(1) == "Selected File"
+    assert page.inspector_tabs.tabText(1) == "Product Image"
+    assert page.inspector_tabs.tabText(2) == "Selected File"
     assert _has_ancestor(window.product_name_edit, page.product_tab)
     assert _has_ancestor(window.store_combo, page.product_tab)
+    assert _has_ancestor(window.product_image_path_edit, page.product_image_tab)
+    assert _has_ancestor(window.product_image_drop_zone, page.product_image_tab)
     assert _has_ancestor(window.detail_view, page.selected_file_tab)
     assert _has_ancestor(window.ask_model_button, page.selected_file_tab)
     assert _has_ancestor(window.source_edit, page.source_toolbar)
@@ -475,6 +478,48 @@ def test_main_window_prefills_product_metadata_from_support_file(qapp, tmp_path:
     assert window.guid_edit.text() == "bf8660f0-d6be-4171-abdd-19a3315e4170"
     assert window.token_edit.text() == "884422"
     assert window.artists_edit.text() == "Sade; Sadriel"
+
+
+def test_main_window_prefills_product_image_from_support_image(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Sadriel" / "Jewelry.duf", dson("scene_subset", author="Sadriel"))
+    write_file(
+        tmp_path / "Runtime" / "Support" / "LOCAL_USER_Celtic_Jewelry.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products><Product VALUE="Celtic Jewelry"/></Products>
+        </ContentDBInstall>
+        """,
+    )
+    write_file(tmp_path / "Runtime" / "Support" / "LOCAL_USER_Celtic_Jewelry.png", b"not a real png")
+
+    window = MainWindow(run_analysis_synchronously=True)
+    window.set_source_path(tmp_path)
+    window.analyze_current_source()
+
+    assert window.product_image_path_edit.text() == "Runtime/Support/LOCAL_USER_Celtic_Jewelry.png"
+    assert window.current_contract["product"]["product_image"] == "Runtime/Support/LOCAL_USER_Celtic_Jewelry.png"
+
+
+def test_main_window_product_image_picker_updates_contract(qapp, tmp_path: Path) -> None:
+    image_path = tmp_path / "cover.jpg"
+    write_file(image_path, b"image-ish")
+    window = MainWindow(available_model_providers=())
+
+    window.set_product_image_path(image_path)
+
+    assert window.product_image_path_edit.text() == str(image_path)
+    assert window.current_contract["product"]["product_image"] == str(image_path)
+
+
+def test_product_image_drop_zone_updates_contract(qapp, tmp_path: Path) -> None:
+    image_path = tmp_path / "drop.png"
+    write_file(image_path, b"image-ish")
+    window = MainWindow(available_model_providers=())
+
+    window.product_image_drop_zone.handle_dropped_path(image_path)
+
+    assert window.product_image_path_edit.text() == str(image_path)
+    assert window.current_contract["product"]["product_image"] == str(image_path)
 
 
 def test_main_window_status_bar_can_show_analysis_progress(qapp) -> None:

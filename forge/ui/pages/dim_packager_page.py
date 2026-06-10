@@ -7,12 +7,15 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
+from forge.ui.widgets.product_image import ProductImageDropZone
 
 
 class DimPackagerPage(QWidget):
@@ -25,6 +28,7 @@ class DimPackagerPage(QWidget):
         self.footer_layout: QVBoxLayout
         self.package_action_bar: QHBoxLayout
         self.product_tab: QWidget
+        self.product_image_tab: QWidget
         self.selected_file_tab: QWidget
         self.source_toolbar: QWidget
         self.inspector_tabs: QTabWidget
@@ -62,8 +66,10 @@ class DimPackagerPage(QWidget):
         self.inspector_tabs = QTabWidget()
         self.inspector_tabs.setMinimumWidth(380)
         self.product_tab = self._build_product_tab()
+        self.product_image_tab = self._build_product_image_tab()
         self.selected_file_tab = self._build_selected_file_tab()
         self.inspector_tabs.addTab(self.product_tab, "Product")
+        self.inspector_tabs.addTab(self.product_image_tab, "Product Image")
         self.inspector_tabs.addTab(self.selected_file_tab, "Selected File")
         review_splitter.addWidget(self.inspector_tabs)
         review_splitter.setSizes([920, 380])
@@ -109,6 +115,23 @@ class DimPackagerPage(QWidget):
         layout.setColumnStretch(1, 1)
         layout.setColumnStretch(3, 1)
         layout.setRowStretch(6, 1)
+        return tab
+
+    def _build_product_image_tab(self) -> QWidget:
+        controller = self.controller
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        layout.addWidget(QLabel("Product image"))
+        controller.product_image_drop_zone = ProductImageDropZone(controller.set_product_image_path)
+        layout.addWidget(controller.product_image_drop_zone, 1)
+        controller.product_image_path_edit.setReadOnly(True)
+        layout.addWidget(controller.product_image_path_edit)
+        button_bar = QHBoxLayout()
+        button_bar.addStretch(1)
+        button_bar.addWidget(controller.choose_product_image_button)
+        layout.addLayout(button_bar)
         return tab
 
     def _build_selected_file_tab(self) -> QWidget:

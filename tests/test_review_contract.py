@@ -96,6 +96,23 @@ def test_product_summary_uses_existing_support_product_fields(tmp_path: Path) ->
     assert contract.product.primary_artist == "Sade"
 
 
+def test_product_summary_uses_support_image_with_matching_stem(tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Sadriel" / "Jewelry.duf", dson("scene_subset", author="Sadriel"))
+    write_file(
+        tmp_path / "Runtime" / "Support" / "LOCAL_USER_Celtic_Jewelry.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products><Product VALUE="Celtic Jewelry"/></Products>
+        </ContentDBInstall>
+        """,
+    )
+    write_file(tmp_path / "Runtime" / "Support" / "LOCAL_USER_Celtic_Jewelry.jpg", "image-ish")
+
+    contract = analyze(tmp_path)
+
+    assert contract.product.product_image == "Runtime/Support/LOCAL_USER_Celtic_Jewelry.jpg"
+
+
 def test_asset_rows_keep_deterministic_model_support_and_final_fields(tmp_path: Path) -> None:
     asset_path = "People/Genesis 9/Hair/Websoul/Hero Hair.duf"
     write_file(tmp_path / asset_path, dson("wearable"))

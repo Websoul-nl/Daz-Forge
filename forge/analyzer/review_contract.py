@@ -35,6 +35,7 @@ class ProductReviewSummary:
     store_code: str = ""
     product_token: str = ""
     global_id: str = ""
+    product_image: str = ""
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,7 @@ def _build_product_summary(
         store_id=support_product.store_id if support_product is not None else "",
         product_token=support_product.product_token if support_product is not None else "",
         global_id=support_product.global_id if support_product is not None else "",
+        product_image=_support_product_image(scan),
     )
 
 
@@ -168,6 +170,34 @@ def _support_product_metadata(scan: SourceScan):
         except SupportParseError:
             continue
     return None
+
+
+def _support_product_image(scan: SourceScan) -> str:
+    support_images = {
+        PurePosixPath(source_file.content_path).with_suffix("").as_posix().lower(): source_file.content_path
+        for source_file in scan.files
+        if _is_support_image(source_file.content_path)
+    }
+    for source_file in scan.files:
+        path = PurePosixPath(source_file.content_path)
+        if len(path.parts) < 3 or path.parts[0].lower() != "runtime" or path.parts[1].lower() != "support":
+            continue
+        if path.suffix.lower() != ".dsx":
+            continue
+        image = support_images.get(path.with_suffix("").as_posix().lower())
+        if image:
+            return image
+    return ""
+
+
+def _is_support_image(content_path: str) -> bool:
+    path = PurePosixPath(content_path)
+    return (
+        len(path.parts) >= 3
+        and path.parts[0].lower() == "runtime"
+        and path.parts[1].lower() == "support"
+        and path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+    )
 
 
 def _build_asset_row(

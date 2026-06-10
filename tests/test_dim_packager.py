@@ -35,6 +35,7 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
     write_file(source / "Props" / "Websoul" / "Hero Prop.duf.png", b"png")
     write_file(source / "Runtime" / "Textures" / "Websoul" / "Hero.jpg", b"texture")
     write_file(source / "Runtime" / "Support" / "OLD_1_Old.dsx", "<old/>")
+    write_file(source / "Runtime" / "Support" / "OLD_1_Old.jpg", b"old image")
 
     contract = analyze_source(source)
     contract["product"].update(
@@ -48,6 +49,7 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
             "global_id": "11111111-2222-4333-8444-555555555555",
             "artists": ["Websoul"],
             "primary_artist": "Websoul",
+            "product_image": "Runtime/Support/OLD_1_Old.jpg",
         }
     )
 
@@ -63,7 +65,10 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         assert "Content/Props/Websoul/Hero Prop.duf.png" in names
         assert "Content/Runtime/Textures/Websoul/Hero.jpg" in names
         assert "Content/Runtime/Support/WEB_24156030_Hero_Product.dsx" in names
+        assert "Content/Runtime/Support/WEB_24156030_Hero_Product.jpg" in names
         assert "Content/Runtime/Support/OLD_1_Old.dsx" not in names
+        assert "Content/Runtime/Support/OLD_1_Old.jpg" not in names
+        assert archive.read("Content/Runtime/Support/WEB_24156030_Hero_Product.jpg") == b"old image"
 
         manifest = archive.read("Manifest.dsx").decode("utf-8")
         assert 'GlobalID VALUE="11111111-2222-4333-8444-555555555555"' in manifest
@@ -84,7 +89,8 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     assert report["zip_name"] == "WEB24156030-01_HeroProduct.zip"
     assert report["package_code"] == "WEB"
-    assert report["skipped_existing_support_files"] == ["Runtime/Support/OLD_1_Old.dsx"]
+    assert report["product_image_path"] == "Runtime/Support/WEB_24156030_Hero_Product.jpg"
+    assert report["skipped_existing_support_files"] == ["Runtime/Support/OLD_1_Old.dsx", "Runtime/Support/OLD_1_Old.jpg"]
 
 
 def test_build_dim_package_combines_store_prefix_and_creator_code_with_six_character_cap(tmp_path: Path) -> None:

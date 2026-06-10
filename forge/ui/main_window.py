@@ -44,7 +44,7 @@ from forge.analyzer.model_provider import (
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import SourceScan, scan_source
 from forge.packager.dim import build_dim_package
-from forge.settings import AppSettings
+from forge.settings import AppSettings, StoreSettings, load_store_catalog, upsert_store
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.review_model import ReviewTableModel
 
@@ -119,6 +119,7 @@ class MainWindow(QMainWindow):
         model_provider_factory: Callable[[str, str], MetadataSuggestionProvider] | None = None,
         available_model_providers: tuple[str, ...] | None = None,
         app_settings: AppSettings | None = None,
+        store_catalog_path: Path | None = None,
         run_analysis_synchronously: bool = False,
     ) -> None:
         super().__init__()
@@ -131,6 +132,8 @@ class MainWindow(QMainWindow):
         self.analysis_worker: AnalysisWorker | None = None
         self.run_analysis_synchronously = run_analysis_synchronously
         self.app_settings = app_settings or AppSettings.defaults()
+        self.store_catalog_path = store_catalog_path or _default_store_catalog_path()
+        self.store_catalog = list(load_store_catalog(self.store_catalog_path))
         self._syncing_product_fields = False
         self.current_contract: dict[str, Any] = {"rows": [], "warnings": [], "hard_blockers": []}
         self.table_model = ReviewTableModel(self.current_contract)
@@ -149,10 +152,13 @@ class MainWindow(QMainWindow):
         self.warnings_only_checkbox = QCheckBox("Warnings only")
         self.product_name_edit = QLineEdit()
         self.product_name_edit.setPlaceholderText("Product name")
-        self.store_edit = QLineEdit()
-        self.store_edit.setPlaceholderText("Store")
+        self.store_combo = QComboBox()
+        self.store_combo.setEditable(True)
+        self.store_combo.addItems([store.display_name for store in self.store_catalog])
+        self.store_prefix_edit = QLineEdit()
+        self.store_prefix_edit.setPlaceholderText("Prefix")
         self.store_code_edit = QLineEdit()
-        self.store_code_edit.setPlaceholderText("Store code")
+        self.store_code_edit.setPlaceholderText("Code")
         self.token_edit = QLineEdit()
         self.token_edit.setPlaceholderText("Token")
         self.guid_edit = QLineEdit()
@@ -299,7 +305,9 @@ class MainWindow(QMainWindow):
         product_bar.addWidget(QLabel("Product"))
         product_bar.addWidget(self.product_name_edit, 2)
         product_bar.addWidget(QLabel("Store"))
-        product_bar.addWidget(self.store_edit, 1)
+        product_bar.addWidget(self.store_combo, 1)
+        product_bar.addWidget(QLabel("Prefix"))
+        product_bar.addWidget(self.store_prefix_edit)
         product_bar.addWidget(QLabel("Code"))
         product_bar.addWidget(self.store_code_edit)
         product_bar.addWidget(QLabel("Token"))
@@ -360,13 +368,14 @@ class MainWindow(QMainWindow):
         self.source_edit.returnPressed.connect(self.analyze_current_source)
         for product_field in (
             self.product_name_edit,
-            self.store_edit,
+            self.store_prefix_edit,
             self.store_code_edit,
             self.token_edit,
             self.guid_edit,
             self.artists_edit,
         ):
             product_field.textChanged.connect(self._product_metadata_changed)
+        self.store_combo.currentTextChanged.connect(self._store_changed)
         self.generate_guid_button.clicked.connect(self.generate_product_guid)
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.warnings_only_checkbox.toggled.connect(self._apply_filter)
@@ -401,6 +410,7 @@ class MainWindow(QMainWindow):
             self._set_issue_lines(["No source selected."])
             return
         try:
+            self._save_current_store_to_catalog()
             result = build_dim_package(
                 scan_source(Path(source_text)),
                 self.current_contract,
@@ -636,10 +646,13 @@ class MainWindow(QMainWindow):
             product["product_name"] = Path(source_path).stem if source_path else ""
         if not product.get("store_display_name"):
             product["store_display_name"] = product.get("store_id") or self.app_settings.default_store.display_name
+        matching_store = self._matching_store(str(product.get("store_display_name") or product.get("store_id") or ""))
         if not product.get("store_id"):
-            product["store_id"] = self.app_settings.default_store.store_id
+            product["store_id"] = matching_store.store_id if matching_store else self.app_settings.default_store.store_id
+        if not product.get("store_prefix"):
+            product["store_prefix"] = matching_store.dim_prefix if matching_store else self.app_settings.default_store.dim_prefix
         if not product.get("store_code"):
-            product["store_code"] = self.app_settings.default_store.dim_prefix
+            product["store_code"] = matching_store.default_code if matching_store else self.app_settings.default_store.default_code
         if not product.get("product_token"):
             product["product_token"] = str(self.app_settings.next_product_number)
         if not product.get("global_id"):
@@ -657,22 +670,36 @@ class MainWindow(QMainWindow):
         self._syncing_product_fields = True
         try:
             self.product_name_edit.setText(str(product.get("product_name", "")))
-            self.store_edit.setText(str(product.get("store_display_name", "")))
-            self.store_code_edit.setText(str(product.get("store_code") or product.get("store_id", "")))
+            self.store_combo.setCurrentText(str(product.get("store_display_name", "") or product.get("store_id", "")))
+            self.store_prefix_edit.setText(str(product.get("store_prefix", "")))
+            self.store_code_edit.setText(str(product.get("store_code", "")))
             self.token_edit.setText(str(product.get("product_token", "")))
             self.guid_edit.setText(str(product.get("global_id", "")))
             self.artists_edit.setText("; ".join(str(artist) for artist in product.get("artists", []) if str(artist)))
         finally:
             self._syncing_product_fields = False
 
+    def _store_changed(self, store_name: str) -> None:
+        if self._syncing_product_fields:
+            return
+        store = self._matching_store(store_name)
+        if store is not None:
+            self.store_prefix_edit.setText(store.dim_prefix)
+            if not self.store_code_edit.text().strip():
+                self.store_code_edit.setText(store.default_code)
+        self._product_metadata_changed()
+
     def _product_metadata_changed(self) -> None:
         if self._syncing_product_fields:
             return
         product = self.current_contract.setdefault("product", {})
         artists = _split_product_artists(self.artists_edit.text())
+        store_name = self.store_combo.currentText().strip()
+        matching_store = self._matching_store(store_name)
         product["product_name"] = self.product_name_edit.text().strip()
-        product["store_display_name"] = self.store_edit.text().strip()
-        product["store_id"] = self.store_code_edit.text().strip()
+        product["store_display_name"] = store_name
+        product["store_id"] = matching_store.store_id if matching_store is not None else store_name
+        product["store_prefix"] = self.store_prefix_edit.text().strip()
         product["store_code"] = self.store_code_edit.text().strip()
         product["product_token"] = self.token_edit.text().strip()
         product["global_id"] = self.guid_edit.text().strip()
@@ -685,6 +712,29 @@ class MainWindow(QMainWindow):
         if configured:
             return Path(configured)
         return source.parent / "Daz Forge Packages"
+
+    def _matching_store(self, value: str) -> StoreSettings | None:
+        key = value.strip().lower()
+        if not key:
+            return None
+        for store in self.store_catalog:
+            if store.display_name.strip().lower() == key or store.store_id.strip().lower() == key:
+                return store
+        return None
+
+    def _save_current_store_to_catalog(self) -> None:
+        product = self.current_contract.get("product", {})
+        store_name = str(product.get("store_display_name") or "").strip()
+        if not store_name:
+            return
+        store = StoreSettings(
+            display_name=store_name,
+            store_id=str(product.get("store_id") or store_name),
+            dim_prefix=str(product.get("store_prefix") or ""),
+            default_code=str(product.get("store_code") or ""),
+        )
+        upsert_store(self.store_catalog_path, store)
+        self.store_catalog = list(load_store_catalog(self.store_catalog_path))
 
     def _should_merge_model_contract(self, contract: dict[str, Any]) -> bool:
         product = contract.get("product", {})
@@ -984,6 +1034,10 @@ def _display_diff_value(value: Any) -> str:
 def _split_product_artists(value: str) -> list[str]:
     normalized = value.replace("\n", ";").replace(",", ";")
     return [part.strip() for part in normalized.split(";") if part.strip()]
+
+
+def _default_store_catalog_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "config" / "stores.json"
 
 
 def _ready_status(contract: dict[str, Any]) -> str:

@@ -27,15 +27,15 @@ def build_dim_package(
 ) -> DimPackageResult:
     product = contract.get("product", {})
     product_name = str(product.get("product_name") or Path(scan.source_path).stem)
-    store_code = _safe_store_code(str(product.get("store_code") or product.get("store_id") or "LOCAL"))
+    package_code = _package_code(product)
     token = _digits(str(product.get("product_token") or "1")) or "1"
     token_padded = token.zfill(8)
     global_id = str(product.get("global_id") or "")
-    package_stem = f"{store_code}{token_padded}-01_{_compact_product_name(product_name)}"
+    package_stem = f"{package_code}{token_padded}-01_{_compact_product_name(product_name)}"
     output_folder.mkdir(parents=True, exist_ok=True)
     zip_path = output_folder / f"{package_stem}.zip"
     report_path = output_folder / f"{package_stem}.report.json"
-    support_content_path = f"Runtime/Support/{store_code}_{token}_{_support_product_name(product_name)}.dsx"
+    support_content_path = f"Runtime/Support/{package_code}_{token}_{_support_product_name(product_name)}.dsx"
     support_archive_path = f"Content/{support_content_path}"
 
     file_payloads: dict[str, bytes] = {}
@@ -62,7 +62,9 @@ def build_dim_package(
     report = {
         "zip_name": zip_path.name,
         "product_name": product_name,
-        "store_code": store_code,
+        "package_code": package_code,
+        "store_prefix": str(product.get("store_prefix") or ""),
+        "store_code": str(product.get("store_code") or ""),
         "product_token": token,
         "global_id": global_id,
         "support_path": support_content_path,
@@ -86,7 +88,7 @@ def _support_xml(contract: dict) -> str:
     root = ET.Element("ContentDBInstall", {"VERSION": "1.0"})
     products = ET.SubElement(root, "Products")
     product_element = ET.SubElement(products, "Product", {"VALUE": str(product.get("product_name", ""))})
-    _child(product_element, "StoreID", str(product.get("store_id") or product.get("store_code") or ""))
+    _child(product_element, "StoreID", str(product.get("store_id") or product.get("store_display_name") or ""))
     _child(product_element, "GlobalID", str(product.get("global_id") or ""))
     _child(product_element, "ProductToken", str(product.get("product_token") or ""))
     artists_element = ET.SubElement(product_element, "Artists")
@@ -151,8 +153,14 @@ def _digits(value: str) -> str:
     return "".join(character for character in value if character.isdigit())
 
 
-def _safe_store_code(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_]", "_", value).strip("_").upper() or "LOCAL"
+def _package_code(product: dict) -> str:
+    prefix = str(product.get("store_prefix") or "")
+    code = str(product.get("store_code") or "")
+    combined = prefix + code
+    if not combined:
+        combined = str(product.get("store_id") or product.get("store_display_name") or "LOCAL")
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", combined).upper()
+    return cleaned[:6] or "LOCAL"
 
 
 def _compact_product_name(value: str) -> str:

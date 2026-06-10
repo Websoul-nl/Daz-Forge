@@ -1,6 +1,13 @@
 ﻿from pathlib import Path
 
-from forge.settings import AppSettings, StoreSettings, load_settings
+from forge.settings import (
+    AppSettings,
+    StoreSettings,
+    default_store_catalog,
+    load_settings,
+    load_store_catalog,
+    upsert_store,
+)
 
 
 def test_default_settings_match_robert_defaults() -> None:
@@ -8,8 +15,8 @@ def test_default_settings_match_robert_defaults() -> None:
 
     assert settings.default_store == StoreSettings(
         display_name="Websoul",
-        store_id="WEBS",
-        dim_prefix="WEBS",
+        store_id="Websoul",
+        dim_prefix="WEB",
     )
     assert settings.next_product_number == 24156030
     assert settings.lm_studio_base_url == "http://127.0.0.1:1234/v1"
@@ -22,7 +29,8 @@ def test_load_settings_creates_file_when_missing(tmp_path: Path) -> None:
     settings = load_settings(settings_path)
 
     assert settings_path.exists()
-    assert settings.default_store.store_id == "WEBS"
+    assert settings.default_store.store_id == "Websoul"
+    assert settings.default_store.dim_prefix == "WEB"
     assert settings.next_product_number == 24156030
 
 
@@ -55,3 +63,34 @@ def test_load_settings_preserves_existing_values(tmp_path: Path) -> None:
     assert settings.default_store.dim_prefix == "RND"
     assert settings.next_product_number == 12345678
     assert settings.preserve_staging is True
+
+
+def test_default_store_catalog_contains_known_store_prefixes() -> None:
+    stores = {store.display_name: store for store in default_store_catalog()}
+
+    assert stores["DAZ 3D"].dim_prefix == "IM"
+    assert stores["LOCAL USER"].dim_prefix == "LU"
+    assert stores["Websoul"].dim_prefix == "WEB"
+    assert stores["3D SHARDS"].dim_prefix == "SHA"
+
+
+def test_load_store_catalog_creates_json_when_missing(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "stores.json"
+
+    stores = load_store_catalog(catalog_path)
+
+    assert catalog_path.exists()
+    assert [store.display_name for store in stores] == ["DAZ 3D", "LOCAL USER", "Websoul", "3D SHARDS"]
+
+
+def test_upsert_store_adds_and_updates_store_catalog(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "stores.json"
+    load_store_catalog(catalog_path)
+
+    upsert_store(catalog_path, StoreSettings("3D SHARDS", "3D SHARDS", "SHX", default_code="SAD"))
+    upsert_store(catalog_path, StoreSettings("Renderosity", "Renderosity", "RND", default_code=""))
+    stores = {store.display_name: store for store in load_store_catalog(catalog_path)}
+
+    assert stores["3D SHARDS"].dim_prefix == "SHX"
+    assert stores["3D SHARDS"].default_code == "SAD"
+    assert stores["Renderosity"].dim_prefix == "RND"

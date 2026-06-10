@@ -31,6 +31,7 @@ class ProductReviewSummary:
     model_available: bool = False
     store_display_name: str = ""
     store_id: str = ""
+    store_prefix: str = ""
     store_code: str = ""
     product_token: str = ""
     global_id: str = ""
@@ -145,7 +146,6 @@ def _build_product_summary(
         model_provider=model_result.provider if model_result is not None else "",
         model_available=model_result.available if model_result is not None else False,
         store_id=support_product.store_id if support_product is not None else "",
-        store_code=support_product.store_id if support_product is not None else "",
         product_token=support_product.product_token if support_product is not None else "",
         global_id=support_product.global_id if support_product is not None else "",
     )

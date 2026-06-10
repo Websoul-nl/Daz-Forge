@@ -331,8 +331,9 @@ def test_main_window_prefills_product_metadata_fields(qapp, tmp_path: Path) -> N
     window.analyze_current_source()
 
     assert window.product_name_edit.text() == "Hero Product"
-    assert window.store_edit.text() == "Websoul"
-    assert window.store_code_edit.text() == "WEBS"
+    assert window.store_combo.currentText() == "Websoul"
+    assert window.store_prefix_edit.text() == "WEB"
+    assert window.store_code_edit.text() == ""
     assert window.token_edit.text() == "24156030"
     assert window.artists_edit.text() == "Websoul"
     assert re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", window.guid_edit.text())
@@ -345,8 +346,9 @@ def test_main_window_product_metadata_edits_update_contract(qapp) -> None:
     window.set_contract(manual_payload())
 
     window.product_name_edit.setText("Better Product")
-    window.store_edit.setText("Renderosity")
-    window.store_code_edit.setText("RND")
+    window.store_combo.setEditText("Renderosity")
+    window.store_prefix_edit.setText("RND")
+    window.store_code_edit.setText("SADE")
     window.token_edit.setText("12345678")
     window.guid_edit.setText("bf8660f0-d6be-4171-abdd-19a3315e4170")
     window.artists_edit.setText("Sade; Websoul")
@@ -354,12 +356,25 @@ def test_main_window_product_metadata_edits_update_contract(qapp) -> None:
     product = window.current_contract["product"]
     assert product["product_name"] == "Better Product"
     assert product["store_display_name"] == "Renderosity"
-    assert product["store_id"] == "RND"
-    assert product["store_code"] == "RND"
+    assert product["store_id"] == "Renderosity"
+    assert product["store_prefix"] == "RND"
+    assert product["store_code"] == "SADE"
     assert product["product_token"] == "12345678"
     assert product["global_id"] == "bf8660f0-d6be-4171-abdd-19a3315e4170"
     assert product["primary_artist"] == "Sade"
     assert product["artists"] == ["Sade", "Websoul"]
+
+
+def test_main_window_store_dropdown_fills_prefix_field(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+    window.set_contract(manual_payload())
+
+    window.store_combo.setCurrentText("3D SHARDS")
+
+    assert window.store_prefix_edit.text() == "SHA"
+    assert window.current_contract["product"]["store_display_name"] == "3D SHARDS"
+    assert window.current_contract["product"]["store_id"] == "3D SHARDS"
+    assert window.current_contract["product"]["store_prefix"] == "SHA"
 
 
 def test_main_window_can_generate_new_product_guid(qapp) -> None:
@@ -399,7 +414,9 @@ def test_main_window_prefills_product_metadata_from_support_file(qapp, tmp_path:
     window.analyze_current_source()
 
     assert window.product_name_edit.text() == "Celtic Jewelry for Genesis 8 and 9"
-    assert window.store_edit.text() == "LOCAL USER"
+    assert window.store_combo.currentText() == "LOCAL USER"
+    assert window.store_prefix_edit.text() == "LU"
+    assert window.store_code_edit.text() == ""
     assert window.guid_edit.text() == "bf8660f0-d6be-4171-abdd-19a3315e4170"
     assert window.token_edit.text() == "884422"
     assert window.artists_edit.text() == "Sade; Sadriel"

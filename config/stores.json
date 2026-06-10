@@ -1,0 +1,28 @@
+{
+  "stores": [
+    {
+      "default_code": "",
+      "dim_prefix": "IM",
+      "display_name": "DAZ 3D",
+      "store_id": "DAZ 3D"
+    },
+    {
+      "default_code": "",
+      "dim_prefix": "LU",
+      "display_name": "LOCAL USER",
+      "store_id": "LOCAL USER"
+    },
+    {
+      "default_code": "",
+      "dim_prefix": "WEB",
+      "display_name": "Websoul",
+      "store_id": "Websoul"
+    },
+    {
+      "default_code": "",
+      "dim_prefix": "SHA",
+      "display_name": "3D SHARDS",
+      "store_id": "3D SHARDS"
+    }
+  ]
+}

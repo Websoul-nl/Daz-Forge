@@ -11,6 +11,16 @@ class StoreSettings:
     display_name: str
     store_id: str
     dim_prefix: str
+    default_code: str = ""
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "StoreSettings":
+        return cls(
+            display_name=str(raw.get("display_name", "")),
+            store_id=str(raw.get("store_id", raw.get("display_name", ""))),
+            dim_prefix=str(raw.get("dim_prefix", raw.get("prefix", ""))),
+            default_code=str(raw.get("default_code", "")),
+        )
 
 
 @dataclass(frozen=True)
@@ -18,8 +28,8 @@ class AppSettings:
     default_store: StoreSettings = field(
         default_factory=lambda: StoreSettings(
             display_name="Websoul",
-            store_id="WEBS",
-            dim_prefix="WEBS",
+            store_id="Websoul",
+            dim_prefix="WEB",
         )
     )
     next_product_number: int = 24156030
@@ -78,3 +88,47 @@ def save_settings(path: Path, settings: AppSettings) -> None:
         json.dumps(settings.to_dict(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def default_store_catalog() -> tuple[StoreSettings, ...]:
+    return (
+        StoreSettings(display_name="DAZ 3D", store_id="DAZ 3D", dim_prefix="IM"),
+        StoreSettings(display_name="LOCAL USER", store_id="LOCAL USER", dim_prefix="LU"),
+        StoreSettings(display_name="Websoul", store_id="Websoul", dim_prefix="WEB"),
+        StoreSettings(display_name="3D SHARDS", store_id="3D SHARDS", dim_prefix="SHA"),
+    )
+
+
+def load_store_catalog(path: Path) -> tuple[StoreSettings, ...]:
+    if not path.exists():
+        stores = default_store_catalog()
+        save_store_catalog(path, stores)
+        return stores
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw_stores = raw.get("stores", raw) if isinstance(raw, dict) else raw
+    if not isinstance(raw_stores, list):
+        raise ValueError(f"Store catalog must contain a list of stores: {path}")
+    stores = tuple(StoreSettings.from_dict(item) for item in raw_stores if isinstance(item, dict))
+    return stores or default_store_catalog()
+
+
+def save_store_catalog(path: Path, stores: tuple[StoreSettings, ...] | list[StoreSettings]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"stores": [asdict(store) for store in stores]}
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def upsert_store(path: Path, store: StoreSettings) -> None:
+    stores = list(load_store_catalog(path))
+    store_key = _store_key(store.display_name)
+    for index, existing in enumerate(stores):
+        if _store_key(existing.display_name) == store_key or _store_key(existing.store_id) == _store_key(store.store_id):
+            stores[index] = store
+            break
+    else:
+        stores.append(store)
+    save_store_catalog(path, stores)
+
+
+def _store_key(value: str) -> str:
+    return value.strip().lower()

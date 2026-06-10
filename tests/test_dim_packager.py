@@ -41,8 +41,9 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         {
             "product_name": "Hero Product",
             "store_display_name": "Websoul",
-            "store_id": "WEBS",
-            "store_code": "WEBS",
+            "store_id": "Websoul",
+            "store_prefix": "WEB",
+            "store_code": "",
             "product_token": "24156030",
             "global_id": "11111111-2222-4333-8444-555555555555",
             "artists": ["Websoul"],
@@ -52,8 +53,8 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
 
     result = build_dim_package(scan_source(source), contract, output)
 
-    assert result.zip_path.name == "WEBS24156030-01_HeroProduct.zip"
-    assert result.report_path.name == "WEBS24156030-01_HeroProduct.report.json"
+    assert result.zip_path.name == "WEB24156030-01_HeroProduct.zip"
+    assert result.report_path.name == "WEB24156030-01_HeroProduct.report.json"
     with ZipFile(result.zip_path) as archive:
         names = set(archive.namelist())
         assert "Manifest.dsx" in names
@@ -61,19 +62,19 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         assert "Content/Props/Websoul/Hero Prop.duf" in names
         assert "Content/Props/Websoul/Hero Prop.duf.png" in names
         assert "Content/Runtime/Textures/Websoul/Hero.jpg" in names
-        assert "Content/Runtime/Support/WEBS_24156030_Hero_Product.dsx" in names
+        assert "Content/Runtime/Support/WEB_24156030_Hero_Product.dsx" in names
         assert "Content/Runtime/Support/OLD_1_Old.dsx" not in names
 
         manifest = archive.read("Manifest.dsx").decode("utf-8")
         assert 'GlobalID VALUE="11111111-2222-4333-8444-555555555555"' in manifest
-        assert 'VALUE="Content/Runtime/Support/WEBS_24156030_Hero_Product.dsx"' in manifest
+        assert 'VALUE="Content/Runtime/Support/WEB_24156030_Hero_Product.dsx"' in manifest
 
         supplement = archive.read("Supplement.dsx").decode("utf-8")
         assert 'ProductName VALUE="Hero Product"' in supplement
 
-        support = archive.read("Content/Runtime/Support/WEBS_24156030_Hero_Product.dsx").decode("utf-8")
+        support = archive.read("Content/Runtime/Support/WEB_24156030_Hero_Product.dsx").decode("utf-8")
         assert '<Product VALUE="Hero Product">' in support
-        assert '<StoreID VALUE="WEBS"/>' in support
+        assert '<StoreID VALUE="Websoul"/>' in support
         assert '<ProductToken VALUE="24156030"/>' in support
         assert '<Artist VALUE="Websoul"/>' in support
         assert '<Asset VALUE="/Props/Websoul/Hero Prop.duf">' in support
@@ -81,6 +82,34 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         assert '<Category VALUE="/Default/Props"/>' in support
 
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
-    assert report["zip_name"] == "WEBS24156030-01_HeroProduct.zip"
+    assert report["zip_name"] == "WEB24156030-01_HeroProduct.zip"
+    assert report["package_code"] == "WEB"
     assert report["skipped_existing_support_files"] == ["Runtime/Support/OLD_1_Old.dsx"]
 
+
+def test_build_dim_package_combines_store_prefix_and_creator_code_with_six_character_cap(tmp_path: Path) -> None:
+    source = tmp_path / "Sade Product"
+    output = tmp_path / "out"
+    write_file(source / "Props" / "Sade" / "Hero Prop.duf", dson("scene_subset", author="Sade"))
+    contract = analyze_source(source)
+    contract["product"].update(
+        {
+            "product_name": "Sade Product",
+            "store_display_name": "3D SHARDS",
+            "store_id": "3D SHARDS",
+            "store_prefix": "SHA",
+            "store_code": "SADE",
+            "product_token": "42",
+            "global_id": "11111111-2222-4333-8444-555555555555",
+            "artists": ["Sade"],
+            "primary_artist": "Sade",
+        }
+    )
+
+    result = build_dim_package(scan_source(source), contract, output)
+
+    assert result.zip_path.name == "SHASAD00000042-01_SadeProduct.zip"
+    assert result.support_path == "Runtime/Support/SHASAD_42_Sade_Product.dsx"
+    with ZipFile(result.zip_path) as archive:
+        support = archive.read("Content/Runtime/Support/SHASAD_42_Sade_Product.dsx").decode("utf-8")
+        assert '<StoreID VALUE="3D SHARDS"/>' in support

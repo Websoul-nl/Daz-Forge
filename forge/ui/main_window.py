@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import shutil
 from typing import Any, Callable
 from uuid import uuid4
@@ -43,9 +44,11 @@ from forge.analyzer.model_provider import (
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import SourceScan, scan_source
 from forge.packager.dim import build_dim_package
+from forge.pose_converter.product import build_converted_pose_dim_package
 from forge.settings import AppSettings, StoreSettings, load_store_catalog, upsert_store
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.pages.dim_packager_page import DimPackagerPage
+from forge.ui.pages.pose_converter_page import PoseConverterPage
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -125,6 +128,7 @@ class MainWindow(QMainWindow):
         store_catalog_path: Path | None = None,
         run_analysis_synchronously: bool = False,
         output_folder_opener: Callable[[Path], None] | None = None,
+        pose_package_builder: Callable[..., Any] | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Daz Forge")
@@ -143,6 +147,7 @@ class MainWindow(QMainWindow):
         self.table_model = ReviewTableModel(self.current_contract)
         self.model_provider_factory = model_provider_factory or self._default_model_provider_factory
         self.output_folder_opener = output_folder_opener or _open_folder_with_desktop
+        self.pose_package_builder = pose_package_builder or build_converted_pose_dim_package
         self.available_model_providers = (
             available_model_providers
             if available_model_providers is not None
@@ -188,6 +193,33 @@ class MainWindow(QMainWindow):
         self.use_support_button = QPushButton("Use Support")
         self.mark_row_reviewed_button = QPushButton("Mark Row Reviewed")
         self.mark_issue_reviewed_button = QPushButton("Mark Issue Reviewed")
+        self.pose_source_edit = QLineEdit()
+        self.pose_source_edit.setPlaceholderText("Select a Genesis 8 Female pose product zip or folder")
+        self.pose_browse_source_button = QPushButton("Browse")
+        self.pose_output_edit = QLineEdit()
+        self.pose_output_edit.setPlaceholderText("Output folder")
+        self.pose_browse_output_button = QPushButton("Output")
+        self.pose_open_output_button = QPushButton("Go to Output Folder")
+        self.pose_product_name_edit = QLineEdit()
+        self.pose_product_name_edit.setPlaceholderText("Converted product name")
+        self.pose_store_combo = QComboBox()
+        self.pose_store_combo.setEditable(True)
+        self.pose_store_combo.addItems([store.display_name for store in self.store_catalog])
+        self.pose_store_combo.setCurrentText(self.app_settings.default_store.display_name)
+        self.pose_store_prefix_edit = QLineEdit(self.app_settings.default_store.dim_prefix)
+        self.pose_store_prefix_edit.setPlaceholderText("Prefix")
+        self.pose_store_code_edit = QLineEdit(self.app_settings.default_store.default_code)
+        self.pose_store_code_edit.setPlaceholderText("Code")
+        self.pose_token_edit = QLineEdit(str(self.app_settings.next_product_number))
+        self.pose_token_edit.setPlaceholderText("Token")
+        self.pose_guid_edit = QLineEdit(str(uuid4()))
+        self.pose_guid_edit.setPlaceholderText("GUID")
+        self.pose_artists_edit = QLineEdit(self.app_settings.default_store.display_name)
+        self.pose_artists_edit.setPlaceholderText("Artists")
+        self.pose_convert_button = QPushButton("Build Converted DIM Package")
+        self.pose_convert_button.setObjectName("primaryPoseConvertButton")
+        self.pose_status_text = QTextEdit()
+        self.pose_status_text.setPlaceholderText("Conversion status")
         self.summary_label = QLabel("No source analyzed")
         self.summary_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.issue_list = QListWidget()
@@ -306,6 +338,8 @@ class MainWindow(QMainWindow):
         self.detail_layout = self.dim_packager_page.detail_layout
         self.package_action_bar = self.dim_packager_page.package_action_bar
         self.tabs.addTab(self.dim_packager_page, "DIM Packager")
+        self.pose_converter_page = PoseConverterPage(self)
+        self.tabs.addTab(self.pose_converter_page, "Pose Converters")
 
     def _connect_signals(self) -> None:
         self.browse_button.clicked.connect(self._browse_source)
@@ -332,6 +366,12 @@ class MainWindow(QMainWindow):
         self.use_support_button.clicked.connect(self.apply_support_to_selected_row)
         self.mark_row_reviewed_button.clicked.connect(self.mark_selected_row_reviewed)
         self.mark_issue_reviewed_button.clicked.connect(self.mark_selected_issue_reviewed)
+        self.pose_browse_source_button.clicked.connect(self._browse_pose_source)
+        self.pose_browse_output_button.clicked.connect(self._browse_pose_output)
+        self.pose_open_output_button.clicked.connect(self.open_pose_output_folder)
+        self.pose_convert_button.clicked.connect(self.build_pose_converter_package)
+        self.pose_source_edit.returnPressed.connect(self._pose_source_entered)
+        self.pose_store_combo.currentTextChanged.connect(self._pose_store_changed)
         self.table_view.selectionModel().currentRowChanged.connect(
             lambda current, previous: self.show_row_details(current.row())
         )
@@ -341,6 +381,116 @@ class MainWindow(QMainWindow):
         if folder:
             self.set_source_path(Path(folder))
             self.analyze_current_source()
+
+    def set_pose_source_path(self, path: Path) -> None:
+        source = Path(path)
+        self.pose_source_edit.setText(str(source))
+        if not self.pose_output_edit.text().strip():
+            self.pose_output_edit.setText(str(self._package_output_folder(source)))
+        if not self.pose_product_name_edit.text().strip():
+            self.pose_product_name_edit.setText(_converted_pose_product_name(source))
+
+    def _pose_source_entered(self) -> None:
+        source_text = self.pose_source_edit.text().strip()
+        if source_text:
+            self.set_pose_source_path(Path(source_text))
+
+    def _browse_pose_source(self) -> None:
+        file_name, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Select Pose Product Zip",
+            "",
+            "DIM Zip (*.zip);;All Files (*.*)",
+        )
+        if file_name:
+            self.set_pose_source_path(Path(file_name))
+
+    def _browse_pose_output(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select Pose Converter Output Folder")
+        if folder:
+            self.pose_output_edit.setText(folder)
+
+    def build_pose_converter_package(self) -> None:
+        if self._analyzing:
+            return
+        source_text = self.pose_source_edit.text().strip()
+        if not source_text:
+            self._set_pose_status("No pose product selected.")
+            return
+        source = Path(source_text)
+        output = Path(self.pose_output_edit.text().strip()) if self.pose_output_edit.text().strip() else self._package_output_folder(source)
+        self.pose_output_edit.setText(str(output))
+        try:
+            self._save_pose_store_to_catalog()
+            self._set_pose_status("Converting pose product...")
+            result = self.pose_package_builder(source, output, metadata=self._pose_package_metadata())
+        except Exception as exc:
+            self._set_pose_status(f"Pose conversion failed: {exc}")
+            self._analysis_progress(f"Pose conversion failed: {exc}")
+            return
+        converted = getattr(result.conversion_report, "converted_count", 0)
+        skipped = getattr(result.conversion_report, "skipped_count", 0)
+        zip_path = getattr(result.package, "zip_path", "")
+        self._set_pose_status(
+            f"Converted {converted} pose file(s).\n"
+            f"Skipped {skipped} file(s).\n"
+            f"Package built: {zip_path}"
+        )
+        self._analysis_progress(f"Pose package built: {zip_path}")
+
+    def open_pose_output_folder(self) -> None:
+        source_text = self.pose_source_edit.text().strip()
+        output_text = self.pose_output_edit.text().strip()
+        if output_text:
+            output_folder = Path(output_text)
+        elif source_text:
+            output_folder = self._package_output_folder(Path(source_text))
+            self.pose_output_edit.setText(str(output_folder))
+        else:
+            self._set_pose_status("No output folder selected.")
+            return
+        output_folder.mkdir(parents=True, exist_ok=True)
+        self.output_folder_opener(output_folder)
+
+    def _pose_store_changed(self, store_name: str) -> None:
+        store = self._matching_store(store_name)
+        if store is None:
+            return
+        self.pose_store_prefix_edit.setText(store.dim_prefix)
+        if not self.pose_store_code_edit.text().strip():
+            self.pose_store_code_edit.setText(store.default_code)
+
+    def _pose_package_metadata(self) -> dict[str, Any]:
+        store_name = self.pose_store_combo.currentText().strip()
+        matching_store = self._matching_store(store_name)
+        artists = _split_product_artists(self.pose_artists_edit.text())
+        return {
+            "product_name": self.pose_product_name_edit.text().strip(),
+            "store_display_name": store_name,
+            "store_id": matching_store.store_id if matching_store is not None else store_name,
+            "store_prefix": self.pose_store_prefix_edit.text().strip(),
+            "store_code": self.pose_store_code_edit.text().strip(),
+            "product_token": self.pose_token_edit.text().strip(),
+            "global_id": self.pose_guid_edit.text().strip(),
+            "artists": artists,
+            "primary_artist": artists[0] if artists else "",
+        }
+
+    def _save_pose_store_to_catalog(self) -> None:
+        store_name = self.pose_store_combo.currentText().strip()
+        if not store_name:
+            return
+        store = StoreSettings(
+            display_name=store_name,
+            store_id=self._pose_package_metadata()["store_id"],
+            dim_prefix=self.pose_store_prefix_edit.text().strip(),
+            default_code=self.pose_store_code_edit.text().strip(),
+        )
+        upsert_store(self.store_catalog_path, store)
+        self.store_catalog = list(load_store_catalog(self.store_catalog_path))
+
+    def _set_pose_status(self, message: str) -> None:
+        self.pose_status_text.setPlainText(message)
 
     def apply_model_to_selected_row(self) -> None:
         if self.table_model.apply_model_to_row(self.table_view.currentIndex().row()):
@@ -605,6 +755,12 @@ class MainWindow(QMainWindow):
         self.build_package_button.setEnabled(not analyzing)
         self.go_to_output_folder_button.setEnabled(not analyzing)
         self.choose_product_image_button.setEnabled(not analyzing)
+        self.pose_source_edit.setEnabled(not analyzing)
+        self.pose_browse_source_button.setEnabled(not analyzing)
+        self.pose_output_edit.setEnabled(not analyzing)
+        self.pose_browse_output_button.setEnabled(not analyzing)
+        self.pose_open_output_button.setEnabled(not analyzing)
+        self.pose_convert_button.setEnabled(not analyzing)
         self._update_model_controls()
 
     def _after_warning_resolution(self) -> None:
@@ -844,13 +1000,19 @@ class MainWindow(QMainWindow):
                 color: #ffffff;
                 font-weight: 600;
             }
-            QPushButton#primaryBuildPackageButton:hover {
+            QPushButton#primaryBuildPackageButton:hover, QPushButton#primaryPoseConvertButton:hover {
                 background: #17b597;
             }
-            QPushButton#primaryBuildPackageButton:disabled {
+            QPushButton#primaryBuildPackageButton:disabled, QPushButton#primaryPoseConvertButton:disabled {
                 background: #2f4f49;
                 border-color: #45645e;
                 color: #aeb8b5;
+            }
+            QPushButton#primaryPoseConvertButton {
+                background: #139a7f;
+                border-color: #20c8a7;
+                color: #ffffff;
+                font-weight: 600;
             }
             QTableView, QListWidget, QTextEdit {
                 background: #25262a;
@@ -1144,6 +1306,19 @@ def _display_diff_value(value: Any) -> str:
 def _split_product_artists(value: str) -> list[str]:
     normalized = value.replace("\n", ";").replace(",", ";")
     return [part.strip() for part in normalized.split(";") if part.strip()]
+
+
+def _converted_pose_product_name(source: Path) -> str:
+    name = source.stem
+    name = re.sub(r"^[A-Z]{0,6}\d{8}-\d{2}_", "", name)
+    replacements = (
+        ("Genesis8Female", "Genesis9"),
+        ("Genesis 8 Female", "Genesis 9"),
+        ("G8F", "G9"),
+    )
+    for old, new in replacements:
+        name = name.replace(old, new)
+    return name or "Converted Pose Product"
 
 
 def _default_store_catalog_path() -> Path:

@@ -2,6 +2,7 @@ import json
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -19,6 +20,7 @@ from forge.ui.main_window import analyze_source
 from forge.ui.main_window import _apply_model_suggestion_diffs, _model_diff_label, _model_suggestion_diffs
 from forge.ui.delegates import CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.pages.dim_packager_page import DimPackagerPage
+from forge.ui.pages.pose_converter_page import PoseConverterPage
 from forge.ui.review_model import ReviewTableModel
 
 
@@ -148,6 +150,18 @@ def test_main_window_wraps_packager_in_first_tab(qapp) -> None:
     assert _has_ancestor(window.build_package_button, window.dim_packager_page)
 
 
+def test_main_window_adds_pose_converter_tab(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+
+    assert window.tabs.count() >= 2
+    assert window.tabs.tabText(1) == "Pose Converters"
+    assert isinstance(window.pose_converter_page, PoseConverterPage)
+    assert _has_ancestor(window.pose_source_edit, window.pose_converter_page)
+    assert _has_ancestor(window.pose_product_name_edit, window.pose_converter_page)
+    assert _has_ancestor(window.pose_convert_button, window.pose_converter_page)
+    assert window.pose_convert_button.objectName() == "primaryPoseConvertButton"
+
+
 def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> None:
     window = MainWindow(available_model_providers=())
     page = window.dim_packager_page
@@ -165,6 +179,45 @@ def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> No
     assert _has_ancestor(window.source_edit, page.source_toolbar)
     assert _has_ancestor(window.analyze_button, page.source_toolbar)
     assert page.footer_layout.itemAt(page.footer_layout.count() - 1).layout() is page.package_action_bar
+
+
+def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -> None:
+    calls = {}
+    source = tmp_path / "IM00083577-01_RoadTripPosesforGenesis8Female.zip"
+    source.write_bytes(b"zip-ish")
+    output = tmp_path / "out"
+
+    def fake_builder(source_path, output_path, *, metadata):
+        calls["source"] = source_path
+        calls["output"] = output_path
+        calls["metadata"] = metadata
+        return SimpleNamespace(
+            conversion_report=SimpleNamespace(converted_count=24, skipped_count=0),
+            package=SimpleNamespace(zip_path=output_path / "WEB24156031-01_RoadTripPosesforGenesis9.zip"),
+        )
+
+    window = MainWindow(available_model_providers=(), pose_package_builder=fake_builder)
+    window.set_pose_source_path(source)
+    window.pose_output_edit.setText(str(output))
+    window.pose_product_name_edit.setText("Road Trip Poses for Genesis 9")
+    window.pose_store_combo.setCurrentText("Websoul")
+    window.pose_store_prefix_edit.setText("WEB")
+    window.pose_store_code_edit.setText("")
+    window.pose_token_edit.setText("24156031")
+    window.pose_guid_edit.setText("11111111-2222-4333-8444-555555555555")
+    window.pose_artists_edit.setText("Websoul")
+
+    window.build_pose_converter_package()
+
+    assert calls["source"] == source
+    assert calls["output"] == output
+    assert calls["metadata"]["product_name"] == "Road Trip Poses for Genesis 9"
+    assert calls["metadata"]["store_id"] == "Websoul"
+    assert calls["metadata"]["store_prefix"] == "WEB"
+    assert calls["metadata"]["product_token"] == "24156031"
+    assert calls["metadata"]["artists"] == ["Websoul"]
+    assert "Converted 24 pose file(s)" in window.pose_status_text.toPlainText()
+    assert "WEB24156031-01_RoadTripPosesforGenesis9.zip" in window.pose_status_text.toPlainText()
 
 
 def _has_ancestor(widget: QWidget, ancestor: QWidget) -> bool:

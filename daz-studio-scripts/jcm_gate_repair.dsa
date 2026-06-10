@@ -20,6 +20,7 @@ var AUTO_DETECT_ACTIVE_CHARACTER = true;
 var APPLY_CHANGES = false;
 var ALLOW_FALLBACK_GATE = false;
 var MAX_PREVIEW_LINES = 80;
+var MAX_DIAGNOSTIC_LINES = 25;
 
 function textOf( value ) {
 	if( value == undefined || value == null ){
@@ -157,6 +158,21 @@ function looksLikeCharacterBody( prop, matchText ) {
 	);
 }
 
+function isGenericGateProperty( prop ) {
+	var name = lower( propertyName( prop ) );
+
+	return (
+		name.indexOf( "base joint" ) >= 0 ||
+		name.indexOf( "joint corrective" ) >= 0 ||
+		name.indexOf( "joint correctives" ) >= 0 ||
+		name.indexOf( "base corrective" ) >= 0 ||
+		name.indexOf( "base pose" ) >= 0 ||
+		name.indexOf( "base flexion" ) >= 0 ||
+		name.indexOf( "genesis 9 base" ) >= 0 ||
+		name.indexOf( "genesis9 base" ) >= 0
+	);
+}
+
 function getNumericValue( prop ) {
 	try {
 		return prop.getValueAsDouble();
@@ -199,6 +215,10 @@ function findActiveCharacterGateProperty( props ) {
 			continue;
 		}
 
+		if( isGenericGateProperty( prop ) ){
+			continue;
+		}
+
 		var name = lower( propertyName( prop ) );
 		if( name.indexOf( "jcm" ) >= 0 || name.indexOf( "cbs" ) >= 0 ){
 			continue;
@@ -236,6 +256,36 @@ function deriveMatchTextFromGate( gateProp ) {
 	}
 
 	return displayName( gateProp );
+}
+
+function collectActiveCharacterDiagnostics( props, limit ) {
+	var lines = [];
+	var count = getListLength( props );
+
+	for( var i = 0; i < count; i++ ){
+		var prop = getPropertyAt( props, i );
+
+		if( !isNumericProperty( prop ) || !isActiveProperty( prop ) ){
+			continue;
+		}
+
+		if( !looksLikeCharacterBody( prop, "" ) ){
+			continue;
+		}
+
+		var suffix = "";
+		if( isGenericGateProperty( prop ) ){
+			suffix = " [generic skipped]";
+		}
+
+		lines.push( "  - " + displayName( prop ) + " = " + getNumericValue( prop ) + suffix );
+
+		if( lines.length >= limit ){
+			break;
+		}
+	}
+
+	return lines;
 }
 
 function looksLikeJcmOrCbs( prop, matchText ) {
@@ -378,12 +428,24 @@ function main() {
 	}
 
 	if( !gateProp ){
-		summarize( "No character gate property found.", [
+		var noGateLines = [
 			"Selected item: " + textOf( figure.name ),
 			"Character match: " + ( CHARACTER_MATCH.length > 0 ? CHARACTER_MATCH : "<auto>" ),
 			"Auto-detect active character: " + AUTO_DETECT_ACTIVE_CHARACTER,
-			"Properties scanned: " + propCount
-		] );
+			"Properties scanned: " + propCount,
+			"",
+			"Manual override hint:",
+			"Set CHARACTER_MATCH and JCM_MATCH to the visible character name, for example Beverly or Judith."
+		];
+
+		var noGateDiagnostics = collectActiveCharacterDiagnostics( props, MAX_DIAGNOSTIC_LINES );
+		if( noGateDiagnostics.length > 0 ){
+			noGateLines.push( "" );
+			noGateLines.push( "Active character-like properties:" );
+			noGateLines = noGateLines.concat( noGateDiagnostics );
+		}
+
+		summarize( "No character gate property found.", noGateLines );
 		return;
 	}
 
@@ -453,6 +515,19 @@ function main() {
 
 	if( candidates.length > MAX_PREVIEW_LINES ){
 		lines.push( "  ... " + ( candidates.length - MAX_PREVIEW_LINES ) + " more" );
+	}
+
+	if( candidates.length == 0 ){
+		var diagnostics = collectActiveCharacterDiagnostics( props, MAX_DIAGNOSTIC_LINES );
+		lines.push( "" );
+		lines.push( "Manual override hint:" );
+		lines.push( "If this picked a generic gate or found no Beverly/Judith JCMs, set CHARACTER_MATCH and JCM_MATCH manually." );
+
+		if( diagnostics.length > 0 ){
+			lines.push( "" );
+			lines.push( "Active character-like properties:" );
+			lines = lines.concat( diagnostics );
+		}
 	}
 
 	if( failed.length > 0 ){

@@ -28,9 +28,26 @@ def test_jcm_gate_repair_can_auto_detect_active_character_gate() -> None:
 
     assert "AUTO_DETECT_ACTIVE_CHARACTER = true" in script
     assert "findActiveCharacterGateProperty" in script
+    assert "isGenericGateProperty" in script
     assert "currentValueIsDefaultValue" in script
     assert "getValueAsDouble" in script
     assert "deriveMatchTextFromGate" in script
+
+
+def test_jcm_gate_repair_rejects_generic_base_joint_corrective_gate() -> None:
+    script = _script_text()
+
+    assert 'name.indexOf( "base joint" ) >= 0' in script
+    assert 'name.indexOf( "joint corrective" ) >= 0' in script
+    assert "if( isGenericGateProperty( prop ) )" in script
+
+
+def test_jcm_gate_repair_reports_active_character_diagnostics() -> None:
+    script = _script_text()
+
+    assert "collectActiveCharacterDiagnostics" in script
+    assert "Active character-like properties:" in script
+    assert "Manual override hint:" in script
 
 
 def test_jcm_gate_repair_adds_multiply_erc_without_auto_saving_assets() -> None:

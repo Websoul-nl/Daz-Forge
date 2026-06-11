@@ -37,6 +37,8 @@ def build_dim_package(
     report_path = output_folder / f"{package_stem}.report.json"
     support_content_path = f"Runtime/Support/{package_code}_{token}_{_support_product_name(product_name)}.dsx"
     support_archive_path = f"Content/{support_content_path}"
+    support_script_content_path = PurePosixPath(support_content_path).with_suffix(".dsa").as_posix()
+    support_script_archive_path = f"Content/{support_script_content_path}"
     support_image_content_path = _support_image_path(support_content_path, str(product.get("product_image") or ""))
 
     file_payloads: dict[str, bytes] = {}
@@ -50,6 +52,7 @@ def build_dim_package(
 
     support_xml = _support_xml(contract)
     file_payloads[support_archive_path] = support_xml.encode("utf-8")
+    file_payloads[support_script_archive_path] = _support_script().encode("utf-8")
     product_image_payload = _product_image_payload(scan, str(product.get("product_image") or ""))
     if support_image_content_path and product_image_payload is not None:
         file_payloads[f"Content/{support_image_content_path}"] = product_image_payload
@@ -72,6 +75,7 @@ def build_dim_package(
         "product_token": token,
         "global_id": global_id,
         "support_path": support_content_path,
+        "support_script_path": support_script_content_path,
         "product_image_path": support_image_content_path,
         "installed_files": list(installed_files),
         "skipped_existing_support_files": skipped_support_files,
@@ -132,6 +136,21 @@ def _supplement_xml(product_name: str) -> str:
     _child(root, "InstallTypes", "Content")
     _child(root, "ProductTags", "DAZStudio4_5")
     return _xml_string(root)
+
+
+def _support_script() -> str:
+    return """// DAZ Studio version 0.0.0.0 filetype DAZ Script
+
+if( App.version >= 67109158 ) //4.0.0.294
+{
+\tvar oFile = new DzFile( getScriptFileName() );
+\tvar oAssetMgr = App.getAssetMgr();
+\tif( oAssetMgr )
+\t{
+\t\toAssetMgr.queueDBMetaFile( oFile.baseName() );
+\t}
+}
+"""
 
 
 def _child(parent: ET.Element, tag: str, value: str) -> ET.Element:

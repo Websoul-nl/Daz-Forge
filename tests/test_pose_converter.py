@@ -171,14 +171,20 @@ def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None
             "Road Trip Poses for Genesis 8 Female/Road Trip 01.duf"
         ) not in names
         assert "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsx" in names
+        assert "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsa" in names
+        assert "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.jpg" in names
 
         support = archive.read(
             "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsx"
+        ).decode("utf-8")
+        support_script = archive.read(
+            "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsa"
         ).decode("utf-8")
         assert '<Product VALUE="Road Trip Poses for Genesis 9">' in support
         assert f'<Asset VALUE="/{converted_pose.removeprefix("Content/")}">' in support
         assert '<ContentType VALUE="Preset/Pose"/>' in support
         assert '<Compatibility VALUE="/Genesis 9/Base"/>' in support
+        assert "queueDBMetaFile" in support_script
 
 
 def _require_road_trip_samples() -> None:

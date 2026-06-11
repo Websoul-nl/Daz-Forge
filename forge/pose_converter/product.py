@@ -63,11 +63,16 @@ def build_converted_pose_dim_package(
     _reset_converted_folder(converted_folder, output_dir)
 
     conversion_report = convert_pose_product(source, converted_folder)
+    package_metadata = dict(metadata or {})
+    if not package_metadata.get("product_image"):
+        copied_support_image = _copy_source_support_image(source, converted_folder)
+        if copied_support_image:
+            package_metadata["product_image"] = copied_support_image
     scan = scan_source(converted_folder)
     inventory = classify_inventory(scan)
     inference = infer_metadata(scan, inventory)
     contract = contract_to_dict(build_review_contract(scan, inventory, inference))
-    contract["product"].update(_package_metadata(source, conversion_report, metadata or {}))
+    contract["product"].update(_package_metadata(source, conversion_report, package_metadata))
     package = build_dim_package(scan, contract, output_dir)
 
     return ConvertedPoseDimPackageResult(
@@ -141,6 +146,37 @@ def _read_source_files(source: Path) -> list[_SourceFile]:
     if source.is_dir():
         return _read_folder_source(source)
     raise ValueError(f"Source must be a zip file or folder: {source}")
+
+
+def _copy_source_support_image(source: Path, converted_folder: Path) -> str:
+    source_files = _read_source_files(source)
+    files_by_lower_path = {item.content_path.lower(): item for item in source_files}
+    for source_file in sorted(source_files, key=lambda item: item.content_path.lower()):
+        path = PurePosixPath(source_file.content_path)
+        if len(path.parts) < 3 or path.parts[0].lower() != "runtime" or path.parts[1].lower() != "support":
+            continue
+        if path.suffix.lower() != ".dsx":
+            continue
+        image = _matching_support_image(path, files_by_lower_path)
+        if image is None:
+            continue
+        output_path = converted_folder / "Content" / Path(image.content_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(image.data)
+        return image.content_path
+    return ""
+
+
+def _matching_support_image(
+    support_path: PurePosixPath,
+    files_by_lower_path: dict[str, _SourceFile],
+) -> _SourceFile | None:
+    stem = support_path.with_suffix("").as_posix()
+    for suffix in (".jpg", ".jpeg", ".png"):
+        image = files_by_lower_path.get(f"{stem}{suffix}".lower())
+        if image is not None:
+            return image
+    return None
 
 
 def _converted_staging_folder(source: Path, output_dir: Path) -> Path:

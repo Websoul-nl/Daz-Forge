@@ -52,7 +52,7 @@ def build_dim_package(
 
     support_xml = _support_xml(contract)
     file_payloads[support_archive_path] = support_xml.encode("utf-8")
-    file_payloads[support_script_archive_path] = _support_script().encode("utf-8")
+    file_payloads[support_script_archive_path] = _support_script(product).encode("utf-8")
     product_image_payload = _product_image_payload(scan, str(product.get("product_image") or ""))
     if support_image_content_path and product_image_payload is not None:
         file_payloads[f"Content/{support_image_content_path}"] = product_image_payload
@@ -138,18 +138,34 @@ def _supplement_xml(product_name: str) -> str:
     return _xml_string(root)
 
 
-def _support_script() -> str:
-    return """// DAZ Studio version 0.0.0.0 filetype DAZ Script
+def _support_script(product: dict) -> str:
+    store_id = str(product.get("store_id") or product.get("store_display_name") or "")
+    store_token = str(product.get("store_token") or "")
+    store_url = str(product.get("store_url") or "")
+    store_registration = ""
+    if store_id.upper() not in {"", "LOCAL USER", "DAZ 3D"}:
+        store_registration = f"""\t\tif( typeof oAssetMgr.createStore == "function" )
+\t\t{{
+\t\t\toAssetMgr.createStore({json.dumps(store_id)}, {json.dumps(store_token)}, {json.dumps(store_url)});
+\t\t\tif( typeof oAssetMgr.refreshStores == "function" )
+\t\t\t{{
+\t\t\t\toAssetMgr.refreshStores();
+\t\t\t}}
+\t\t}}
+"""
+    return f"""// DAZ Studio version 0.0.0.0 filetype DAZ Script
 
 if( App.version >= 67109158 ) //4.0.0.294
-{
+{{
 \tvar oFile = new DzFile( getScriptFileName() );
 \tvar oAssetMgr = App.getAssetMgr();
 \tif( oAssetMgr )
-\t{
+\t{{
+\t\t// Custom package stores must exist before DAZ imports the product metadata.
+{store_registration}
 \t\toAssetMgr.queueDBMetaFile( oFile.baseName() );
-\t}
-}
+\t}}
+}}
 """
 
 

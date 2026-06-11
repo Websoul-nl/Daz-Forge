@@ -72,7 +72,9 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         assert "Content/Runtime/Support/OLD_1_Old.dsa" not in names
         assert "Content/Runtime/Support/OLD_1_Old.jpg" not in names
         assert archive.read("Content/Runtime/Support/WEB_24156030_Hero_Product.jpg") == b"old image"
-        assert "queueDBMetaFile" in archive.read("Content/Runtime/Support/WEB_24156030_Hero_Product.dsa").decode("utf-8")
+        support_script = archive.read("Content/Runtime/Support/WEB_24156030_Hero_Product.dsa").decode("utf-8")
+        assert 'createStore("Websoul", "", "")' in support_script
+        assert "queueDBMetaFile" in support_script
 
         manifest = archive.read("Manifest.dsx").decode("utf-8")
         assert 'GlobalID VALUE="11111111-2222-4333-8444-555555555555"' in manifest

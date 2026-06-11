@@ -3,6 +3,7 @@ import os
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -218,6 +219,32 @@ def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -
     assert calls["metadata"]["artists"] == ["Websoul"]
     assert "Converted 24 pose file(s)" in window.pose_status_text.toPlainText()
     assert "WEB24156031-01_RoadTripPosesforGenesis9.zip" in window.pose_status_text.toPlainText()
+
+
+def test_pose_converter_prefills_readable_product_name_from_support_file(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "IM00083577-01_RoadTripPosesforGenesis8Female.zip"
+    with ZipFile(source, "w") as archive:
+        archive.writestr(
+            "Content/Runtime/Support/DAZ_3D_83577_Road_Trip_Poses_for_Genesis_8_Female.dsx",
+            """
+            <ContentDBInstall VERSION="1.0">
+              <Products>
+                <Product VALUE="Road Trip Poses for Genesis 8 Female">
+                  <StoreID VALUE="DAZ 3D"/>
+                </Product>
+              </Products>
+            </ContentDBInstall>
+            """,
+        )
+        archive.writestr(
+            "Content/People/Genesis 8 Female/Poses/Road Trip Poses for Genesis 8 Female/Road Trip 01.duf",
+            dson("preset_pose"),
+        )
+
+    window = MainWindow(available_model_providers=())
+    window.set_pose_source_path(source)
+
+    assert window.pose_product_name_edit.text() == "Road Trip Poses for Genesis 9"
 
 
 def _has_ancestor(widget: QWidget, ancestor: QWidget) -> bool:

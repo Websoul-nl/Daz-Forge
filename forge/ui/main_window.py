@@ -42,7 +42,8 @@ from forge.analyzer.model_provider import (
     request_model_suggestions,
 )
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
-from forge.analyzer.source import SourceScan, scan_source
+from forge.analyzer.source import SourceScan, read_source_file, scan_source
+from forge.analyzer.support import SupportParseError, parse_support_metadata
 from forge.packager.dim import build_dim_package
 from forge.pose_converter.product import build_converted_pose_dim_package
 from forge.settings import AppSettings, StoreSettings, load_store_catalog, upsert_store
@@ -1309,8 +1310,33 @@ def _split_product_artists(value: str) -> list[str]:
 
 
 def _converted_pose_product_name(source: Path) -> str:
+    support_name = _support_product_name_from_source(source)
+    if support_name:
+        return _convert_pose_product_name_to_g9(support_name)
     name = source.stem
     name = re.sub(r"^[A-Z]{0,6}\d{8}-\d{2}_", "", name)
+    return _convert_pose_product_name_to_g9(name) or "Converted Pose Product"
+
+
+def _support_product_name_from_source(source: Path) -> str:
+    try:
+        scan = scan_source(source)
+    except Exception:
+        return ""
+    for source_file in scan.files:
+        path = source_file.content_path.lower()
+        if not path.startswith("runtime/support/") or not path.endswith(".dsx"):
+            continue
+        try:
+            metadata = parse_support_metadata(read_source_file(scan, source_file))
+        except (OSError, SupportParseError):
+            continue
+        if metadata.product_name:
+            return metadata.product_name
+    return ""
+
+
+def _convert_pose_product_name_to_g9(name: str) -> str:
     replacements = (
         ("Genesis8Female", "Genesis9"),
         ("Genesis 8 Female", "Genesis 9"),
@@ -1318,7 +1344,7 @@ def _converted_pose_product_name(source: Path) -> str:
     )
     for old, new in replacements:
         name = name.replace(old, new)
-    return name or "Converted Pose Product"
+    return name
 
 
 def _default_store_catalog_path() -> Path:

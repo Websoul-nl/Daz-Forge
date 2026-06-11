@@ -3,7 +3,7 @@
 // Test helper for Daz Forge store-import experiments.
 // Change STORE_ID if you need to reset a different custom store.
 
-var STORE_ID = "Websoul";
+var STORE_ID = "WEBSOUL";
 
 function hasStore( oAssetMgr, sStoreID )
 {

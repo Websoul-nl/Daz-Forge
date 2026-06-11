@@ -143,7 +143,7 @@ def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None
         metadata={
             "product_name": "Road Trip Poses for Genesis 9",
             "store_display_name": "Websoul",
-            "store_id": "Websoul",
+            "store_id": "WEBSOUL",
             "store_prefix": "WEB",
             "product_token": "24156031",
             "global_id": "11111111-2222-4333-8444-555555555555",
@@ -170,15 +170,15 @@ def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None
             "Content/People/Genesis 8 Female/Poses/"
             "Road Trip Poses for Genesis 8 Female/Road Trip 01.duf"
         ) not in names
-        assert "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsx" in names
-        assert "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsa" in names
-        assert "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.jpg" in names
+        assert "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsx" in names
+        assert "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsa" in names
+        assert "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.jpg" in names
 
         support = archive.read(
-            "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsx"
+            "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsx"
         ).decode("utf-8")
         support_script = archive.read(
-            "Content/Runtime/Support/WEB_24156031_Road_Trip_Poses_for_Genesis_9.dsa"
+            "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsa"
         ).decode("utf-8")
         assert '<Product VALUE="Road Trip Poses for Genesis 9">' in support
         assert f'<Asset VALUE="/{converted_pose.removeprefix("Content/")}">' in support

@@ -3,9 +3,9 @@
   "default_output_folder": "",
   "default_staging_folder": "",
   "default_store": {
-    "dim_prefix": "WEBS",
+    "dim_prefix": "WEB",
     "display_name": "Websoul",
-    "store_id": "WEBS"
+    "store_id": "WEBSOUL"
   },
   "dim_downloads_folder": "",
   "lm_studio_base_url": "http://127.0.0.1:1234/v1",

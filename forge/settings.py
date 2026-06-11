@@ -28,7 +28,7 @@ class AppSettings:
     default_store: StoreSettings = field(
         default_factory=lambda: StoreSettings(
             display_name="Websoul",
-            store_id="Websoul",
+            store_id="WEBSOUL",
             dim_prefix="WEB",
         )
     )
@@ -94,7 +94,7 @@ def default_store_catalog() -> tuple[StoreSettings, ...]:
     return (
         StoreSettings(display_name="DAZ 3D", store_id="DAZ 3D", dim_prefix="IM"),
         StoreSettings(display_name="LOCAL USER", store_id="LOCAL USER", dim_prefix="LU"),
-        StoreSettings(display_name="Websoul", store_id="Websoul", dim_prefix="WEB"),
+        StoreSettings(display_name="Websoul", store_id="WEBSOUL", dim_prefix="WEB"),
         StoreSettings(display_name="3D SHARDS", store_id="3D SHARDS", dim_prefix="SHA"),
     )
 

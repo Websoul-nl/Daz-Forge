@@ -32,10 +32,11 @@ def build_dim_package(
     token_padded = token.zfill(8)
     global_id = str(product.get("global_id") or "")
     package_stem = f"{package_code}{token_padded}-01_{_compact_product_name(product_name)}"
+    support_store_name = _support_store_name(product)
     output_folder.mkdir(parents=True, exist_ok=True)
     zip_path = output_folder / f"{package_stem}.zip"
     report_path = output_folder / f"{package_stem}.report.json"
-    support_content_path = f"Runtime/Support/{package_code}_{token}_{_support_product_name(product_name)}.dsx"
+    support_content_path = f"Runtime/Support/{support_store_name}_{token}_{_support_product_name(product_name)}.dsx"
     support_archive_path = f"Content/{support_content_path}"
     support_script_content_path = PurePosixPath(support_content_path).with_suffix(".dsa").as_posix()
     support_script_archive_path = f"Content/{support_script_content_path}"
@@ -70,6 +71,7 @@ def build_dim_package(
         "zip_name": zip_path.name,
         "product_name": product_name,
         "package_code": package_code,
+        "support_store_name": support_store_name,
         "store_prefix": str(product.get("store_prefix") or ""),
         "store_code": str(product.get("store_code") or ""),
         "product_token": token,
@@ -225,6 +227,12 @@ def _package_code(product: dict) -> str:
         combined = str(product.get("store_id") or product.get("store_display_name") or "LOCAL")
     cleaned = re.sub(r"[^A-Za-z0-9]", "", combined).upper()
     return cleaned[:6] or "LOCAL"
+
+
+def _support_store_name(product: dict) -> str:
+    store_id = str(product.get("store_id") or product.get("store_display_name") or "LOCAL USER").strip()
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", store_id).strip("_").upper()
+    return cleaned or "LOCAL_USER"
 
 
 def _compact_product_name(value: str) -> str:

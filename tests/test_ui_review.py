@@ -213,7 +213,7 @@ def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -
     assert calls["source"] == source
     assert calls["output"] == output
     assert calls["metadata"]["product_name"] == "Road Trip Poses for Genesis 9"
-    assert calls["metadata"]["store_id"] == "Websoul"
+    assert calls["metadata"]["store_id"] == "WEBSOUL"
     assert calls["metadata"]["store_prefix"] == "WEB"
     assert calls["metadata"]["product_token"] == "24156031"
     assert calls["metadata"]["artists"] == ["Websoul"]

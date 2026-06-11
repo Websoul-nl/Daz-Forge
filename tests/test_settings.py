@@ -15,7 +15,7 @@ def test_default_settings_match_robert_defaults() -> None:
 
     assert settings.default_store == StoreSettings(
         display_name="Websoul",
-        store_id="Websoul",
+        store_id="WEBSOUL",
         dim_prefix="WEB",
     )
     assert settings.next_product_number == 24156030
@@ -29,7 +29,7 @@ def test_load_settings_creates_file_when_missing(tmp_path: Path) -> None:
     settings = load_settings(settings_path)
 
     assert settings_path.exists()
-    assert settings.default_store.store_id == "Websoul"
+    assert settings.default_store.store_id == "WEBSOUL"
     assert settings.default_store.dim_prefix == "WEB"
     assert settings.next_product_number == 24156030
 

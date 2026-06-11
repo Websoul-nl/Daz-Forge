@@ -215,6 +215,7 @@ class MainWindow(QMainWindow):
         self.pose_token_edit.setPlaceholderText("Token")
         self.pose_guid_edit = QLineEdit(str(uuid4()))
         self.pose_guid_edit.setPlaceholderText("GUID")
+        self.pose_generate_guid_button = QPushButton("Generate")
         self.pose_artists_edit = QLineEdit(self.app_settings.default_store.display_name)
         self.pose_artists_edit.setPlaceholderText("Artists")
         self.pose_convert_button = QPushButton("Build Converted DIM Package")
@@ -373,6 +374,7 @@ class MainWindow(QMainWindow):
         self.pose_convert_button.clicked.connect(self.build_pose_converter_package)
         self.pose_source_edit.returnPressed.connect(self._pose_source_entered)
         self.pose_store_combo.currentTextChanged.connect(self._pose_store_changed)
+        self.pose_generate_guid_button.clicked.connect(self.generate_pose_guid)
         self.table_view.selectionModel().currentRowChanged.connect(
             lambda current, previous: self.show_row_details(current.row())
         )
@@ -422,6 +424,7 @@ class MainWindow(QMainWindow):
         output = Path(self.pose_output_edit.text().strip()) if self.pose_output_edit.text().strip() else self._package_output_folder(source)
         self.pose_output_edit.setText(str(output))
         try:
+            self.generate_pose_guid()
             self._save_pose_store_to_catalog()
             self._set_pose_status("Converting pose product...")
             result = self.pose_package_builder(source, output, metadata=self._pose_package_metadata())
@@ -476,6 +479,9 @@ class MainWindow(QMainWindow):
             "artists": artists,
             "primary_artist": artists[0] if artists else "",
         }
+
+    def generate_pose_guid(self) -> None:
+        self.pose_guid_edit.setText(str(uuid4()))
 
     def _save_pose_store_to_catalog(self) -> None:
         store_name = self.pose_store_combo.currentText().strip()

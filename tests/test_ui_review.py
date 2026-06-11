@@ -205,7 +205,8 @@ def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -
     window.pose_store_prefix_edit.setText("WEB")
     window.pose_store_code_edit.setText("")
     window.pose_token_edit.setText("24156031")
-    window.pose_guid_edit.setText("11111111-2222-4333-8444-555555555555")
+    stale_guid = "11111111-2222-4333-8444-555555555555"
+    window.pose_guid_edit.setText(stale_guid)
     window.pose_artists_edit.setText("Websoul")
 
     window.build_pose_converter_package()
@@ -216,6 +217,8 @@ def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -
     assert calls["metadata"]["store_id"] == "WEBSOUL"
     assert calls["metadata"]["store_prefix"] == "WEB"
     assert calls["metadata"]["product_token"] == "24156031"
+    assert calls["metadata"]["global_id"] != stale_guid
+    assert calls["metadata"]["global_id"] == window.pose_guid_edit.text()
     assert calls["metadata"]["artists"] == ["Websoul"]
     assert "Converted 24 pose file(s)" in window.pose_status_text.toPlainText()
     assert "WEB24156031-01_RoadTripPosesforGenesis9.zip" in window.pose_status_text.toPlainText()

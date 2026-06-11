@@ -56,6 +56,9 @@ def test_convert_road_trip_01_matches_key_g9_calibration_values() -> None:
         ("neck2", "rotation", "y"): expected[("neck2", "rotation", "y")],
         ("spine1", "rotation", "x"): expected[("spine1", "rotation", "x")],
         ("spine2", "rotation", "x"): expected[("spine2", "rotation", "x")],
+        ("", "translation", "x"): expected[("", "translation", "x")],
+        ("", "translation", "z"): expected[("", "translation", "z")],
+        ("", "rotation", "y"): expected[("", "rotation", "y")],
     }
 
     for key, value in expected_values.items():
@@ -74,6 +77,30 @@ def test_convert_road_trip_01_writes_lean_pose_without_default_clutter() -> None
         for animation in animations
     )
     assert "lSmallToe4_2" in result.unmapped_bones
+
+
+def test_convert_preserves_root_selection_transforms() -> None:
+    pose = {
+        "file_version": "0.6.1.0",
+        "asset_info": {"type": "preset_pose"},
+        "scene": {
+            "animations": [
+                {"url": "name://@selection:?translation/x/value", "keys": [[0, 52.92363]]},
+                {"url": "name://@selection:?translation/y/value", "keys": [[0, 0]]},
+                {"url": "name://@selection:?translation/z/value", "keys": [[0, -210.5422]]},
+                {"url": "name://@selection:?rotation/y/value", "keys": [[0, 180]]},
+                {"url": "name://@selection/hip:?translation/y/value", "keys": [[0, -22.21478]]},
+            ]
+        },
+    }
+
+    result = convert_g8f_pose_to_g9(pose)
+    converted = _meaningful_animation_map(result.pose)
+
+    assert converted[("", "translation", "x")] == pytest.approx(52.92363)
+    assert converted[("", "translation", "z")] == pytest.approx(-210.5422)
+    assert converted[("", "rotation", "y")] == pytest.approx(180)
+    assert converted[("hip", "translation", "y")] == pytest.approx(-22.21478)
 
 
 def test_convert_pose_product_zip_writes_g9_output_folder_and_report(tmp_path: Path) -> None:
@@ -221,12 +248,19 @@ def _meaningful_animation_map(pose: dict) -> dict[tuple[str, str, str], float]:
 
 
 def _parse_animation_url(url: str) -> tuple[str, str, str] | None:
-    prefix = "name://@selection/"
+    bone_prefix = "name://@selection/"
+    root_prefix = "name://@selection"
     marker = ":?"
     suffix = "/value"
-    if not url.startswith(prefix) or marker not in url or not url.endswith(suffix):
+    if not url.endswith(suffix) or marker not in url:
         return None
-    bone, channel = url[len(prefix) : -len(suffix)].split(marker, 1)
+    if url.startswith(bone_prefix):
+        bone, channel = url[len(bone_prefix) : -len(suffix)].split(marker, 1)
+    elif url.startswith(root_prefix + marker):
+        bone = ""
+        channel = url[len(root_prefix + marker) : -len(suffix)]
+    else:
+        return None
     parts = channel.split("/")
     if len(parts) != 2:
         return None

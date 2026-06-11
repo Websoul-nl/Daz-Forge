@@ -63,14 +63,21 @@ def convert_g8f_pose_to_g9(pose: dict[str, Any]) -> PoseConversionResult:
 
 
 def parse_animation_url(url: str) -> tuple[str, str, str] | None:
-    prefix = "name://@selection/"
+    bone_prefix = "name://@selection/"
+    root_prefix = "name://@selection"
     marker = ":?"
     suffix = "/value"
 
-    if not url.startswith(prefix) or marker not in url or not url.endswith(suffix):
+    if not url.endswith(suffix) or marker not in url:
         return None
 
-    bone, channel = url[len(prefix) : -len(suffix)].split(marker, 1)
+    if url.startswith(bone_prefix):
+        bone, channel = url[len(bone_prefix) : -len(suffix)].split(marker, 1)
+    elif url.startswith(root_prefix + marker):
+        bone = ""
+        channel = url[len(root_prefix + marker) : -len(suffix)]
+    else:
+        return None
     parts = channel.split("/")
     if len(parts) != 2:
         return None
@@ -78,6 +85,8 @@ def parse_animation_url(url: str) -> tuple[str, str, str] | None:
 
 
 def animation_url(ref: ChannelRef) -> str:
+    if not ref.bone:
+        return f"name://@selection:?{ref.group}/{ref.axis}/value"
     return f"name://@selection/{ref.bone}:?{ref.group}/{ref.axis}/value"
 
 

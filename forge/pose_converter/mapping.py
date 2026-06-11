@@ -49,7 +49,8 @@ def direct_bone(source_bone: str, target_bone: str) -> tuple[MappingRule, ...]:
 
 
 G8F_TO_G9_RULES: tuple[MappingRule, ...] = (
-    direct_bone("hip", "hip")
+    direct_bone("", "")
+    + direct_bone("hip", "hip")
     + direct_bone("pelvis", "pelvis")
     + direct_bone("abdomenLower", "spine1")
     + direct_bone("abdomenUpper", "spine2")

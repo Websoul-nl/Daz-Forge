@@ -1,0 +1,52 @@
+// DAZ Studio version 0.0.0.0 filetype DAZ Script
+//
+// Test helper for Daz Forge store-import experiments.
+// Change STORE_ID if you need to reset a different custom store.
+
+var STORE_ID = "Websoul";
+
+function hasStore( oAssetMgr, sStoreID )
+{
+	var aStores = oAssetMgr.getStoresIDs();
+	for( var i = 0; i < aStores.length; i += 1 )
+	{
+		if( String( aStores[ i ] ) == sStoreID )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+var sTitle = "Daz Forge Store Cleanup";
+var oAssetMgr = App.getAssetMgr();
+
+if( !oAssetMgr )
+{
+	MessageBox.critical( "Asset manager was not available.", sTitle, "&OK" );
+}
+else if( typeof oAssetMgr.removeStore != "function" )
+{
+	MessageBox.critical( "This DAZ Studio build does not expose DzAssetMgr.removeStore().", sTitle, "&OK" );
+}
+else
+{
+	var bBefore = hasStore( oAssetMgr, STORE_ID );
+	var bRemoved = false;
+	if( bBefore )
+	{
+		bRemoved = oAssetMgr.removeStore( STORE_ID );
+		if( typeof oAssetMgr.refreshStores == "function" )
+		{
+			oAssetMgr.refreshStores();
+		}
+	}
+
+	var bAfter = hasStore( oAssetMgr, STORE_ID );
+	var sMessage =
+		"Store: " + STORE_ID + "\n" +
+		"Found before: " + bBefore + "\n" +
+		"removeStore returned: " + bRemoved + "\n" +
+		"Found after refresh: " + bAfter;
+	MessageBox.information( sMessage, sTitle, "&OK" );
+}

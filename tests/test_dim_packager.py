@@ -92,6 +92,11 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         assert '<Asset VALUE="/Props/Websoul/Hero Prop.duf">' in support
         assert '<ContentType VALUE="Set"/>' in support
         assert '<Category VALUE="/Default/Props"/>' in support
+        assert '<SupportAssets VALUE="/Runtime/Support/WEBSOUL_24156030_Hero_Product.dsx">' in support
+        assert '<SupportAsset VALUE="/Props/Websoul/Hero Prop.duf"/>' in support
+        assert '<SupportAsset VALUE="/Props/Websoul/Hero Prop.duf.png"/>' in support
+        assert '<SupportAsset VALUE="/Runtime/Support/WEBSOUL_24156030_Hero_Product.jpg"/>' in support
+        assert '<SupportAsset VALUE="/Runtime/Textures/Websoul/Hero.jpg"/>' in support
 
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     assert report["zip_name"] == "WEB24156030-01_HeroProduct.zip"
@@ -131,3 +136,4 @@ def test_build_dim_package_combines_store_prefix_and_creator_code_with_six_chara
     with ZipFile(result.zip_path) as archive:
         support = archive.read("Content/Runtime/Support/3D_SHARDS_42_Sade_Product.dsx").decode("utf-8")
         assert '<StoreID VALUE="3D SHARDS"/>' in support
+        assert '<SupportAssets VALUE="/Runtime/Support/3D_SHARDS_42_Sade_Product.dsx">' in support

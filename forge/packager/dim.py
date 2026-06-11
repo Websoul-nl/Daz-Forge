@@ -44,19 +44,22 @@ def build_dim_package(
 
     file_payloads: dict[str, bytes] = {}
     skipped_support_files: list[str] = []
+    support_asset_paths: list[str] = []
     for source_file in scan.files:
         content_path = PurePosixPath(source_file.content_path).as_posix()
         if _is_existing_support_file(content_path):
             skipped_support_files.append(content_path)
             continue
         file_payloads[f"Content/{content_path}"] = read_source_file(scan, source_file)
+        support_asset_paths.append(content_path)
 
-    support_xml = _support_xml(contract)
-    file_payloads[support_archive_path] = support_xml.encode("utf-8")
-    file_payloads[support_script_archive_path] = _support_script(product).encode("utf-8")
     product_image_payload = _product_image_payload(scan, str(product.get("product_image") or ""))
     if support_image_content_path and product_image_payload is not None:
         file_payloads[f"Content/{support_image_content_path}"] = product_image_payload
+        support_asset_paths.append(support_image_content_path)
+    support_xml = _support_xml(contract, support_content_path, tuple(sorted(set(support_asset_paths))))
+    file_payloads[support_archive_path] = support_xml.encode("utf-8")
+    file_payloads[support_script_archive_path] = _support_script(product).encode("utf-8")
     installed_files = tuple(sorted(file_payloads))
     manifest_xml = _manifest_xml(global_id, installed_files)
     supplement_xml = _supplement_xml(product_name)
@@ -94,7 +97,7 @@ def build_dim_package(
     )
 
 
-def _support_xml(contract: dict) -> str:
+def _support_xml(contract: dict, support_content_path: str, support_asset_paths: tuple[str, ...]) -> str:
     product = contract.get("product", {})
     root = ET.Element("ContentDBInstall", {"VERSION": "1.0"})
     products = ET.SubElement(root, "Products")
@@ -121,6 +124,9 @@ def _support_xml(contract: dict) -> str:
         compatibilities = ET.SubElement(asset, "Compatibilities")
         for compatibility in _values(final.get("compatibilities", [])):
             _child(compatibilities, "Compatibility", compatibility)
+    support_assets_element = ET.SubElement(product_element, "SupportAssets", {"VALUE": f"/{support_content_path}"})
+    for content_path in support_asset_paths:
+        _child(support_assets_element, "SupportAsset", f"/{content_path}")
     return _xml_string(root)
 
 

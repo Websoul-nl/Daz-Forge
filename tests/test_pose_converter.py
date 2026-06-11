@@ -184,6 +184,9 @@ def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None
         assert f'<Asset VALUE="/{converted_pose.removeprefix("Content/")}">' in support
         assert '<ContentType VALUE="Preset/Pose"/>' in support
         assert '<Compatibility VALUE="/Genesis 9/Base"/>' in support
+        assert '<SupportAssets VALUE="/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsx">' in support
+        assert f'<SupportAsset VALUE="/{converted_pose.removeprefix("Content/")}"/>' in support
+        assert '<SupportAsset VALUE="/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.jpg"/>' in support
         assert "queueDBMetaFile" in support_script
 
 

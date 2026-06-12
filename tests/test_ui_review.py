@@ -16,6 +16,7 @@ from forge.analyzer.inventory import classify_inventory
 from forge.analyzer.model_provider import OllamaProvider
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
+from forge.product_tokens import SourceProductIdentity, record_product_token_build
 from forge.ui.main_window import AnalysisWorker, MainWindow
 from forge.ui.main_window import analyze_source
 from forge.ui.main_window import _apply_model_suggestion_diffs, _model_diff_label, _model_suggestion_diffs
@@ -40,6 +41,13 @@ def write_file(path: Path, content: bytes | str = b"x") -> None:
         path.write_text(content, encoding="utf-8")
     else:
         path.write_bytes(content)
+
+
+def _write_zip(path: Path, entries: dict[str, bytes]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with ZipFile(path, "w") as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
 
 
 def dson(asset_type: str, author: str = "Websoul") -> bytes:
@@ -337,6 +345,290 @@ def test_pose_converter_prefills_readable_product_name_from_support_file(qapp, t
 
     assert window.pose_product_name_edit.text() == "Road Trip Poses for Genesis 9"
 
+
+def test_dim_packager_reuses_source_token_and_logs_build(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "IM00083577-01_HeroProduct.zip"
+    _write_zip(
+        source,
+        {
+            "Content/Runtime/Support/DAZ_3D_83577_Hero_Product.dsx": b'''<?xml version="1.0" encoding="utf-8"?>
+<ContentDBInstall VERSION="1.0">
+  <Products>
+    <Product VALUE="Hero Product">
+      <StoreID VALUE="DAZ 3D"/>
+      <ProductToken VALUE="83577"/>
+    </Product>
+  </Products>
+</ContentDBInstall>''',
+            "Content/Props/Hero.duf": b"{}",
+        },
+    )
+    settings_path = tmp_path / "settings.json"
+    registry_path = tmp_path / "product-tokens.json"
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=settings_path,
+        token_registry_path=registry_path,
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+    window.store_combo.setCurrentText("LOCAL USER")
+    window.build_current_package()
+
+    assert window.token_edit.text() == "83577"
+    raw = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert raw["entries"][0]["output_store_id"] == "LOCAL USER"
+    assert raw["entries"][0]["assigned_token"] == "83577"
+    assert raw["entries"][0]["token_source"] == "source"
+
+
+def test_dim_packager_warns_for_same_store_token_collision(qapp, tmp_path: Path) -> None:
+    registry_path = tmp_path / "product-tokens.json"
+    record_product_token_build(
+        registry_path,
+        source_identity=SourceProductIdentity("path:first", source_product_name="First"),
+        workflow_label="DIM Packager",
+        output_store_id="LOCAL USER",
+        generated_product_name="First",
+        assigned_token="90000000",
+        token_source="generated",
+    )
+    source = tmp_path / "Second"
+    source.mkdir()
+    write_file(source / "Props" / "Second.duf")
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        token_registry_path=registry_path,
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+    window.store_combo.setCurrentText("LOCAL USER")
+    window.build_current_package()
+
+    assert "Product token already used in LOCAL USER by First" in window.issue_text()
+
+
+def test_dim_packager_clears_token_collision_warning_after_manual_token_recovery(qapp, tmp_path: Path) -> None:
+    registry_path = tmp_path / "product-tokens.json"
+    record_product_token_build(
+        registry_path,
+        source_identity=SourceProductIdentity("path:first", source_product_name="First"),
+        workflow_label="DIM Packager",
+        output_store_id="LOCAL USER",
+        generated_product_name="First",
+        assigned_token="90000000",
+        token_source="generated",
+    )
+    source = tmp_path / "Recovered Collision Hero"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        token_registry_path=registry_path,
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+    window.store_combo.setCurrentText("LOCAL USER")
+    window.build_current_package()
+
+    assert "product-token-collision" in window.issue_text()
+
+    window.token_edit.setText("90000001")
+    window.build_current_package()
+
+    assert "product-token-collision" not in window.issue_text()
+
+
+def test_dim_packager_preserves_manual_token_on_build(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "Manual Hero"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    settings_path = tmp_path / "settings.json"
+    registry_path = tmp_path / "product-tokens.json"
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=settings_path,
+        token_registry_path=registry_path,
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+    window.token_edit.setText("12345678")
+    window.build_current_package()
+
+    output = tmp_path / "Daz Forge Packages"
+    report = json.loads(next(output.glob("*.report.json")).read_text(encoding="utf-8"))
+    assert report["product_token"] == "12345678"
+    with ZipFile(next(output.glob("*.zip"))) as archive:
+        support_xml = archive.read("Content/Runtime/Support/LOCAL_USER_12345678_Manual_Hero.dsx").decode("utf-8")
+    assert 'ProductToken VALUE="12345678"' in support_xml
+    raw = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert raw["entries"][0]["assigned_token"] == "12345678"
+    assert raw["entries"][0]["token_source"] == "manual"
+
+
+def test_dim_packager_preserves_manual_token_after_store_change(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "Store Changed Hero"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    registry_path = tmp_path / "product-tokens.json"
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        token_registry_path=registry_path,
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+    window.token_edit.setText("12345678")
+    window.store_combo.setCurrentText("Renderosity")
+    window.build_current_package()
+
+    assert window.token_edit.text() == "12345678"
+    raw = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert raw["entries"][0]["output_store_id"] == "Renderosity"
+    assert raw["entries"][0]["assigned_token"] == "12345678"
+    assert raw["entries"][0]["token_source"] == "manual"
+
+
+def test_dim_packager_reports_invalid_registry_json(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "Broken Registry Hero"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    registry_path = tmp_path / "product-tokens.json"
+    registry_path.write_text("{broken", encoding="utf-8")
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        token_registry_path=registry_path,
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+    window.build_current_package()
+
+    assert "Invalid product token registry JSON" in window.issue_text()
+
+
+def test_dim_packager_reports_registry_read_error_during_token_refresh(qapp, tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "Registry Read Error Hero"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+
+    def fail_resolve(*args, **kwargs):
+        raise OSError("registry read failed")
+
+    monkeypatch.setattr("forge.ui.main_window.resolve_product_token", fail_resolve)
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        token_registry_path=tmp_path / "product-tokens.json",
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+
+    assert "registry read failed" in window.issue_text()
+
+
+def test_dim_packager_clears_registry_warning_after_token_refresh_recovers(qapp, tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "Recovered Registry Hero"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    calls = {"count": 0}
+
+    def flaky_resolve(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError("registry read failed")
+        from forge.product_tokens import resolve_product_token
+
+        return resolve_product_token(*args, **kwargs)
+
+    monkeypatch.setattr("forge.ui.main_window.resolve_product_token", flaky_resolve)
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        token_registry_path=tmp_path / "product-tokens.json",
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+
+    assert "product-token-registry" in window.issue_text()
+
+    window._refresh_product_token_assignment(update_control=True)
+
+    assert "product-token-registry" not in window.issue_text()
+
+
+def test_dim_packager_advances_generated_token_when_registry_recording_fails(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "Registry Write Failure Hero"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    settings_path = tmp_path / "settings.json"
+
+    def fail_record(*args, **kwargs):
+        raise OSError("registry write failed")
+
+    monkeypatch.setattr("forge.ui.main_window.record_product_token_build", fail_record)
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=settings_path,
+        token_registry_path=tmp_path / "product-tokens.json",
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+    window.build_current_package()
+
+    assert "registry write failed" in window.issue_text()
+    assert window.app_settings.next_product_number == 90000001
+    assert load_settings(settings_path).next_product_number == 90000001
+
+
+def test_dim_packager_retry_syncs_visible_generated_token_after_registry_recording_failure(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "Registry Retry Hero"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    settings_path = tmp_path / "settings.json"
+    registry_path = tmp_path / "product-tokens.json"
+    attempts = {"count": 0}
+    recorded_tokens = []
+
+    def flaky_record(*args, **kwargs):
+        attempts["count"] += 1
+        recorded_tokens.append(kwargs["assigned_token"])
+        if attempts["count"] == 1:
+            raise OSError("registry write failed")
+        record_product_token_build(*args, **kwargs)
+
+    monkeypatch.setattr("forge.ui.main_window.record_product_token_build", flaky_record)
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=settings_path,
+        token_registry_path=registry_path,
+        run_analysis_synchronously=True,
+    )
+
+    window.set_source_path(source)
+    window.analyze_current_source()
+
+    window.build_current_package()
+
+    assert "registry write failed" in window.issue_text()
+    assert window.token_edit.text() == "90000000"
+    assert window.app_settings.next_product_number == 90000001
+
+    window.build_current_package()
+
+    assert recorded_tokens == ["90000000", "90000001"]
+    assert window.current_contract["product"]["product_token"] == "90000001"
+    assert window.token_edit.text() == "90000001"
 
 def _has_ancestor(widget: QWidget, ancestor: QWidget) -> bool:
     current: QWidget | None = widget

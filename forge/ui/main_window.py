@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import re
 import shutil
@@ -48,6 +48,13 @@ from forge.analyzer.source import SourceScan, read_source_file, scan_source
 from forge.analyzer.support import SupportParseError, parse_support_metadata
 from forge.packager.dim import build_dim_package
 from forge.pose_converter.product import build_converted_pose_dim_package
+from forge.product_tokens import (
+    ProductTokenRegistryError,
+    load_product_token_registry,
+    record_product_token_build,
+    resolve_product_token,
+    source_identity_from_path,
+)
 from forge.settings import AppSettings, StoreSettings, load_store_catalog, save_settings, upsert_store
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.pages.dim_packager_page import DimPackagerPage
@@ -237,6 +244,7 @@ class MainWindow(QMainWindow):
         app_settings: AppSettings | None = None,
         settings_path: Path | None = None,
         store_catalog_path: Path | None = None,
+        token_registry_path: Path | None = None,
         run_analysis_synchronously: bool = False,
         output_folder_opener: Callable[[Path], None] | None = None,
         pose_package_builder: Callable[..., Any] | None = None,
@@ -253,6 +261,7 @@ class MainWindow(QMainWindow):
         self.app_settings = app_settings or AppSettings.defaults()
         self.settings_path = settings_path or _default_settings_path()
         self.store_catalog_path = store_catalog_path or _default_store_catalog_path()
+        self.token_registry_path = token_registry_path or _default_token_registry_path()
         self.store_catalog = list(load_store_catalog(self.store_catalog_path))
         self._syncing_product_fields = False
         self.current_contract: dict[str, Any] = {"rows": [], "warnings": [], "hard_blockers": []}
@@ -659,18 +668,67 @@ class MainWindow(QMainWindow):
         if not source_text:
             self._set_issue_lines(["No source selected."])
             return
+        product = self.current_contract.setdefault("product", {})
+        self._product_metadata_changed()
+        self._refresh_product_token_assignment(update_control=True)
+        source = Path(source_text)
+        source_identity = source_identity_from_path(source)
+        output_store_id = str(product.get("store_id", ""))
+        assigned_token = str(product.get("product_token", ""))
+        try:
+            collisions = load_product_token_registry(self.token_registry_path).collisions_for(
+                output_store_id=output_store_id,
+                assigned_token=assigned_token,
+                source_identity=source_identity,
+                workflow_label="DIM Packager",
+            )
+        except (OSError, ProductTokenRegistryError) as exc:
+            self._set_product_token_registry_issue(str(exc))
+            return
+        if collisions:
+            first = collisions[0]
+            message = f"Product token already used in {first.output_store_id} by {first.product_name}"
+            warnings = [
+                issue for issue in self.current_contract.get("warnings", [])
+                if issue.get("code") != "product-token-collision"
+            ]
+            warnings.append({"code": "product-token-collision", "message": message})
+            self.current_contract["warnings"] = warnings
+            self._set_issue_lines(
+                self._issue_lines()
+            )
+            return
+        self._clear_product_token_warnings("product-token-collision")
         try:
             self._save_current_store_to_catalog()
             result = build_dim_package(
-                scan_source(Path(source_text)),
+                scan_source(source),
                 self.current_contract,
-                self._package_output_folder(Path(source_text)),
+                self._package_output_folder(source),
             )
         except Exception as exc:
             self._set_issue_lines([f"Package build failed: {exc}"])
             self._analysis_progress(f"Package build failed: {exc}")
             return
         self._analysis_progress(f"Package built: {result.zip_path}")
+        token_source = self._product_token_source_for_build(source_identity)
+        try:
+            record_product_token_build(
+                self.token_registry_path,
+                source_identity=source_identity,
+                workflow_label="DIM Packager",
+                output_store_id=output_store_id,
+                generated_product_name=str(product.get("product_name", "")),
+                assigned_token=assigned_token,
+                token_source=token_source,
+            )
+        except (OSError, ProductTokenRegistryError) as exc:
+            self._advance_generated_product_token_if_current(product, token_source, assigned_token)
+            self._set_product_token_registry_issue(str(exc))
+            self._analysis_progress(f"Package built, but registry update failed: {exc}")
+            return
+        self._advance_generated_product_token_if_current(product, token_source, assigned_token)
+        self._clear_product_token_warnings("product-token-collision", "product-token-registry")
 
     def open_output_folder(self) -> None:
         source_text = self.source_edit.text().strip()
@@ -949,6 +1007,7 @@ class MainWindow(QMainWindow):
             product["primary_artist"] = artists[0]
 
     def _populate_product_fields(self) -> None:
+        self._refresh_product_token_assignment()
         product = self.current_contract.get("product", {})
         self._syncing_product_fields = True
         try:
@@ -974,6 +1033,7 @@ class MainWindow(QMainWindow):
         self._product_metadata_changed()
 
     def _product_metadata_changed(self) -> None:
+        self._refresh_product_token_assignment(update_control=True)
         if self._syncing_product_fields:
             return
         product = self.current_contract.setdefault("product", {})
@@ -988,12 +1048,104 @@ class MainWindow(QMainWindow):
         product["product_token"] = self.token_edit.text().strip()
         product["global_id"] = self.guid_edit.text().strip()
         product["product_image"] = self.product_image_path_edit.text().strip()
+        if self._has_manual_product_token():
+            product["product_token_source"] = "manual"
+            product["product_token_is_new_generated"] = False
         product["artists"] = artists
         product["primary_artist"] = artists[0] if artists else ""
         self.summary_label.setText(self.summary_text())
 
     def _set_product_image_text(self, value: str) -> None:
         self.product_image_path_edit.setText(value)
+    def _refresh_product_token_assignment(self, update_control: bool = False) -> None:
+        product = self.current_contract.setdefault("product", {})
+        source_path = str(product.get("source_path") or self.source_edit.text().strip())
+        if not source_path:
+            return
+        if self._has_manual_product_token():
+            product["product_token_source"] = "manual"
+            product["product_token_is_new_generated"] = False
+            return
+        try:
+            assignment = resolve_product_token(
+                self.token_registry_path,
+                source_identity=source_identity_from_path(Path(source_path)),
+                workflow_label="DIM Packager",
+                output_store_id=str(product.get("store_id", "")),
+                generated_product_name=str(product.get("product_name", "")),
+                next_product_number=self.app_settings.next_product_number,
+            )
+        except (OSError, ProductTokenRegistryError) as exc:
+            product["product_token_registry_error"] = str(exc)
+            self._set_product_token_registry_issue(str(exc))
+            return
+        product["product_token"] = assignment.token
+        product["product_token_source"] = assignment.token_source
+        product["product_token_is_new_generated"] = assignment.is_new_generated
+        product["product_token_last_auto"] = assignment.token
+        product.pop("product_token_registry_error", None)
+        self._clear_product_token_warnings("product-token-registry")
+        if update_control:
+            self._syncing_product_fields = True
+            try:
+                self.token_edit.setText(assignment.token)
+            finally:
+                self._syncing_product_fields = False
+
+    def _has_manual_product_token(self) -> bool:
+        product = self.current_contract.setdefault("product", {})
+        last_auto = str(product.get("product_token_last_auto", ""))
+        current = str(product.get("product_token", ""))
+        return bool(last_auto and current and current != last_auto)
+
+    def _product_token_source_for_build(self, source_identity) -> str:
+        product = self.current_contract.setdefault("product", {})
+        assigned_token = str(product.get("product_token", ""))
+        if source_identity.source_product_token and assigned_token == source_identity.source_product_token:
+            return "source"
+        if self._has_manual_product_token():
+            return "manual"
+        if (
+            assigned_token == str(product.get("product_token_last_auto", ""))
+            and str(product.get("product_token_source", "")) == "generated"
+        ):
+            return "generated"
+        return "manual"
+
+    def _advance_generated_product_token_if_current(
+        self, product: dict[str, Any], token_source: str, assigned_token: str
+    ) -> None:
+        if (
+            bool(product.get("product_token_is_new_generated"))
+            and token_source == "generated"
+            and assigned_token == str(self.app_settings.next_product_number)
+        ):
+            self._save_next_product_number(self.app_settings.next_product_number + 1)
+            product["product_token_is_new_generated"] = False
+
+    def _set_product_token_registry_issue(self, message: str) -> None:
+        warnings = [
+            issue for issue in self.current_contract.get("warnings", [])
+            if issue.get("code") != "product-token-registry"
+        ]
+        warnings.append({"code": "product-token-registry", "message": message})
+        self.current_contract["warnings"] = warnings
+        self._set_issue_lines(self._issue_lines())
+
+    def _clear_product_token_warnings(self, *codes: str) -> None:
+        code_set = set(codes)
+        warnings = [
+            issue for issue in self.current_contract.get("warnings", [])
+            if issue.get("code") not in code_set
+        ]
+        if warnings != self.current_contract.get("warnings", []):
+            self.current_contract["warnings"] = warnings
+            self._set_issue_lines(self._issue_lines())
+
+    def _save_next_product_number(self, value: int) -> None:
+        self.app_settings = replace(self.app_settings, next_product_number=value)
+        save_settings(self.settings_path, self.app_settings)
+
         drop_zone = getattr(self, "product_image_drop_zone", None)
         if drop_zone is not None:
             drop_zone.set_image_path(self._resolved_product_image_path(value))
@@ -1510,6 +1662,10 @@ def _default_store_catalog_path() -> Path:
 
 def _default_settings_path() -> Path:
     return Path(__file__).resolve().parents[2] / "config" / "settings.json"
+
+
+def _default_token_registry_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "config" / "product-tokens.json"
 
 
 def _open_folder_with_desktop(path: Path) -> None:

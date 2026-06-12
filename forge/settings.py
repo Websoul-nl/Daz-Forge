@@ -37,7 +37,7 @@ class AppSettings:
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_output_folder: str = ""
     default_staging_folder: str = ""
-    default_daz_library: str = "E:/Libraries/Daz Libraries/Daz3D Library New"
+    default_daz_library: str = ""
     dim_downloads_folder: str = ""
     preserve_staging: bool = False
 

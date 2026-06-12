@@ -47,10 +47,10 @@ def test_load_settings_preserves_existing_values(tmp_path: Path) -> None:
           "next_product_number": 12345678,
           "lm_studio_base_url": "http://localhost:9999/v1",
           "ollama_base_url": "http://localhost:11434",
-          "default_output_folder": "D:/DIM Output",
-          "default_staging_folder": "D:/DIM Staging",
-          "default_daz_library": "E:/Libraries/Daz Libraries/Daz3D Library New",
-          "dim_downloads_folder": "D:/DIM Downloads",
+          "default_output_folder": "build/output",
+          "default_staging_folder": "build/staging",
+          "default_daz_library": "example/library",
+          "dim_downloads_folder": "build/downloads",
           "preserve_staging": true
         }
         """,

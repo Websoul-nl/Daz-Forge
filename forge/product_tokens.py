@@ -6,6 +6,10 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile, LargeZipFile
+
+from forge.analyzer.source import SourceScanError, read_source_file, scan_source
+from forge.analyzer.support import SupportParseError, parse_support_metadata
 
 
 class ProductTokenRegistryError(ValueError):
@@ -83,7 +87,7 @@ class ProductTokenEntry:
     ) -> bool:
         return (
             self.source_key == source_identity.source_key
-            and self.source_store_id == source_identity.source_store_id
+            and _normalize_identity_part(self.source_store_id) == _normalize_identity_part(source_identity.source_store_id)
             and _normalize_token(self.source_product_token) == _normalize_token(source_identity.source_product_token)
             and self.output_store_id == output_store_id
             and self.workflow_label == workflow_label
@@ -267,6 +271,44 @@ def resolve_product_token(
     )
 
 
+def source_identity_from_path(source: Path) -> SourceProductIdentity:
+    path = Path(source)
+    try:
+        scan = scan_source(path)
+    except (SourceScanError, OSError, BadZipFile, LargeZipFile):
+        scan = None
+
+    if scan is not None:
+        for source_file in scan.files:
+            content_path = source_file.content_path.replace("\\", "/")
+            if not _is_support_metadata_path(content_path):
+                continue
+            try:
+                metadata = parse_support_metadata(read_source_file(scan, source_file))
+            except (OSError, BadZipFile, LargeZipFile, SupportParseError):
+                continue
+            normalized_token = _normalize_token(metadata.product_token)
+            normalized_store = _normalize_identity_part(metadata.store_id)
+            normalized_name = _normalize_identity_part(metadata.product_name)
+            if (normalized_store and normalized_token) or normalized_name:
+                return SourceProductIdentity(
+                    source_key=_support_source_key(
+                        normalized_store=normalized_store,
+                        normalized_token=normalized_token,
+                        normalized_name=normalized_name,
+                    ),
+                    source_store_id=metadata.store_id,
+                    source_product_token=normalized_token,
+                    source_product_name=metadata.product_name,
+                )
+
+    fallback_name = path.stem if path.is_file() and path.suffix.lower() == ".zip" else path.name
+    return SourceProductIdentity(
+        source_key=f"path:{_normalize_identity_part(fallback_name)}",
+        source_product_name=fallback_name,
+    )
+
+
 def record_product_token_build(
     registry_path: str | Path,
     *,
@@ -292,6 +334,27 @@ def record_product_token_build(
 def _normalize_token(token: str) -> str:
     digits = re.sub(r"\D", "", token)
     return digits.lstrip("0") or ("0" if digits else "")
+
+
+def _normalize_identity_part(value: str) -> str:
+    normalized = value.replace("_", " ")
+    return re.sub(r"\s+", " ", normalized).strip().lower()
+
+
+def _is_support_metadata_path(content_path: str) -> bool:
+    parts = content_path.split("/")
+    return (
+        len(parts) == 3
+        and parts[0].lower() == "runtime"
+        and parts[1].lower() == "support"
+        and parts[2].lower().endswith(".dsx")
+    )
+
+
+def _support_source_key(*, normalized_store: str, normalized_token: str, normalized_name: str) -> str:
+    if normalized_store and normalized_token:
+        return f"support:{normalized_store}:{normalized_token}"
+    return f"support:{normalized_store}:{normalized_token}:{normalized_name}"
 
 
 def _validate_entry_field_types(entry: ProductTokenEntry) -> None:

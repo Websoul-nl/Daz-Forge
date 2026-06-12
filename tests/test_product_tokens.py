@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -11,6 +12,7 @@ from forge.product_tokens import (
     load_product_token_registry,
     resolve_product_token,
     record_product_token_build,
+    source_identity_from_path,
 )
 
 
@@ -21,6 +23,147 @@ def test_source_identity_defaults_optional_metadata() -> None:
     assert source.source_store_id == ""
     assert source.source_product_token == ""
     assert source.source_product_name == "First"
+
+
+def test_source_identity_reads_support_metadata_from_zip(tmp_path: Path) -> None:
+    zip_path = tmp_path / "IM00083577-01_HeroProduct.zip"
+    write_support_zip(zip_path, product_name="Hero Product", store_id="DAZ 3D", token="83577")
+
+    result = source_identity_from_path(zip_path)
+
+    assert result.source_key == "support:daz 3d:83577"
+    assert result.source_store_id == "DAZ 3D"
+    assert result.source_product_token == "83577"
+    assert result.source_product_name == "Hero Product"
+
+
+def test_source_identity_accepts_store_token_support_metadata_without_product_name(tmp_path: Path) -> None:
+    zip_path = tmp_path / "IM00083577-01_HeroProduct.zip"
+    write_support_zip(zip_path, product_name="", store_id="DAZ 3D", token="83577")
+
+    result = source_identity_from_path(zip_path)
+
+    assert result.source_key == "support:daz 3d:83577"
+    assert result.source_store_id == "DAZ 3D"
+    assert result.source_product_token == "83577"
+    assert result.source_product_name == ""
+
+
+def test_source_identity_skips_bad_support_metadata_and_uses_next_readable_zip_entry(tmp_path: Path) -> None:
+    zip_path = tmp_path / "IM00083577-01_HeroProduct.zip"
+    with ZipFile(zip_path, "w") as archive:
+        archive.writestr("Content/Runtime/Support/Bad.dsx", b"<ContentDBInstall>")
+        archive.writestr(
+            "Content/Runtime/Support/Good.dsx",
+            support_metadata(product_name="Hero Product", store_id="DAZ 3D", token="83577"),
+        )
+
+    result = source_identity_from_path(zip_path)
+
+    assert result.source_key == "support:daz 3d:83577"
+    assert result.source_store_id == "DAZ 3D"
+    assert result.source_product_token == "83577"
+    assert result.source_product_name == "Hero Product"
+
+
+def test_source_identity_store_token_key_reuses_manual_override_across_product_name_changes(tmp_path: Path) -> None:
+    registry_path = tmp_path / "product-tokens.json"
+    first_zip = tmp_path / "HeroProduct.zip"
+    renamed_zip = tmp_path / "HeroProductRenamed.zip"
+    write_support_zip(first_zip, product_name="Hero Product", store_id="DAZ 3D", token="83577")
+    write_support_zip(renamed_zip, product_name="Hero Product Renamed", store_id="DAZ 3D", token="83577")
+
+    first = source_identity_from_path(first_zip)
+    renamed = source_identity_from_path(renamed_zip)
+    record_product_token_build(
+        registry_path,
+        source_identity=first,
+        workflow_label="DIM Packager",
+        output_store_id="LOCAL USER",
+        generated_product_name="Hero Product",
+        assigned_token="12345678",
+        token_source="manual",
+    )
+
+    assignment = resolve_product_token(
+        registry_path,
+        source_identity=renamed,
+        workflow_label="DIM Packager",
+        output_store_id="LOCAL USER",
+        generated_product_name="Hero Product Renamed",
+        next_product_number=90000000,
+    )
+
+    assert first.source_key == renamed.source_key
+    assert first.source_key == "support:daz 3d:83577"
+    assert assignment == TokenAssignment(token="12345678", token_source="manual", is_new_generated=False)
+
+
+def test_source_identity_reuses_manual_override_across_store_spacing_and_case_changes(tmp_path: Path) -> None:
+    registry_path = tmp_path / "product-tokens.json"
+    first_zip = tmp_path / "HeroProduct.zip"
+    respaced_zip = tmp_path / "HeroProductRespaced.zip"
+    write_support_zip(first_zip, product_name="Hero Product", store_id="DAZ 3D", token="83577")
+    write_support_zip(respaced_zip, product_name="Hero Product", store_id="daz  3d", token="83577")
+
+    first = source_identity_from_path(first_zip)
+    respaced = source_identity_from_path(respaced_zip)
+    record_product_token_build(
+        registry_path,
+        source_identity=first,
+        workflow_label="DIM Packager",
+        output_store_id="LOCAL USER",
+        generated_product_name="Hero Product",
+        assigned_token="12345678",
+        token_source="manual",
+    )
+
+    assignment = resolve_product_token(
+        registry_path,
+        source_identity=respaced,
+        workflow_label="DIM Packager",
+        output_store_id="LOCAL USER",
+        generated_product_name="Hero Product",
+        next_product_number=90000000,
+    )
+
+    assert first.source_key == respaced.source_key
+    assert assignment == TokenAssignment(token="12345678", token_source="manual", is_new_generated=False)
+
+
+def test_source_identity_falls_back_to_normalized_path_name(tmp_path: Path) -> None:
+    source = tmp_path / "Loose Product"
+    source.mkdir()
+
+    result = source_identity_from_path(source)
+
+    assert result.source_key == "path:loose product"
+    assert result.source_product_name == "Loose Product"
+    assert result.source_product_token == ""
+
+
+def test_gitignore_ignores_product_token_registry() -> None:
+    assert "config/product-tokens.json" in Path(".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def write_support_zip(zip_path: Path, *, product_name: str, store_id: str, token: str) -> None:
+    with ZipFile(zip_path, "w") as archive:
+        archive.writestr(
+            "Content/Runtime/Support/Product.dsx",
+            support_metadata(product_name=product_name, store_id=store_id, token=token),
+        )
+
+
+def support_metadata(*, product_name: str, store_id: str, token: str) -> bytes:
+    return f'''<?xml version="1.0" encoding="utf-8"?>
+<ContentDBInstall VERSION="1.0">
+  <Products>
+    <Product VALUE="{product_name}">
+      <StoreID VALUE="{store_id}"/>
+      <ProductToken VALUE="{token}"/>
+    </Product>
+  </Products>
+</ContentDBInstall>'''.encode("utf-8")
 
 
 def identity(name: str = "Hero Product", token: str = "", store: str = "") -> SourceProductIdentity:

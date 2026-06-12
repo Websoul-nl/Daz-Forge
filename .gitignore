@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .pytest_cache/
 config/settings.json
+config/product-tokens.json

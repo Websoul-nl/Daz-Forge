@@ -67,7 +67,21 @@ class AppSettings:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            "default_daz_library": self.default_daz_library,
+            "default_output_folder": self.default_output_folder,
+            "default_staging_folder": self.default_staging_folder,
+            "default_store": {
+                "dim_prefix": self.default_store.dim_prefix,
+                "display_name": self.default_store.display_name,
+                "store_id": self.default_store.store_id,
+            },
+            "dim_downloads_folder": self.dim_downloads_folder,
+            "lm_studio_base_url": self.lm_studio_base_url,
+            "next_product_number": self.next_product_number,
+            "ollama_base_url": self.ollama_base_url,
+            "preserve_staging": self.preserve_staging,
+        }
 
 
 def load_settings(path: Path) -> AppSettings:

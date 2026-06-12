@@ -62,6 +62,17 @@ Start Daz Forge.bat
 
 Daz Forge creates `config/settings.json` if it does not exist.
 
+Open settings from the cog button in the top-right of the app. Use it to set:
+
+- test library, meaning an optional clean DAZ content library for package validation and test installs
+- DIM downloads folder
+- package output folder
+- staging folder
+- default store and DIM prefix
+- next product number
+- LM Studio and Ollama URLs
+- whether staging folders are preserved after builds
+
 Default store is `LOCAL USER`. This is the safest choice for private packages because DAZ Studio can rewrite unknown custom stores to `LOCAL USER` if you edit and save product metadata inside DAZ.
 
 Store catalog entries live in `config/stores.json`. The DIM package prefix and DAZ metadata store are separate concepts:
@@ -70,6 +81,7 @@ Store catalog entries live in `config/stores.json`. The DIM package prefix and D
 - Store ID: value written into the support DSX metadata and support filename.
 
 For example, a custom store can use a short DIM prefix but a longer Store ID.
+Artist-specific store codes belong on the product metadata fields for the package you are building, not in global settings.
 
 ## DIM Packager Workflow
 

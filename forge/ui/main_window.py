@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -46,7 +48,7 @@ from forge.analyzer.source import SourceScan, read_source_file, scan_source
 from forge.analyzer.support import SupportParseError, parse_support_metadata
 from forge.packager.dim import build_dim_package
 from forge.pose_converter.product import build_converted_pose_dim_package
-from forge.settings import AppSettings, StoreSettings, load_store_catalog, upsert_store
+from forge.settings import AppSettings, StoreSettings, load_store_catalog, save_settings, upsert_store
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.pages.dim_packager_page import DimPackagerPage
 from forge.ui.pages.pose_converter_page import PoseConverterPage
@@ -120,12 +122,120 @@ class ModelSuggestionDialog(QDialog):
         return selected
 
 
+class SettingsDialog(QDialog):
+    def __init__(
+        self,
+        settings: AppSettings,
+        stores: list[StoreSettings],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.resize(720, 420)
+        self._stores = stores
+
+        self.default_daz_library_edit = QLineEdit(settings.default_daz_library)
+        self.default_daz_library_edit.setPlaceholderText("Optional clean DAZ test library")
+        test_library_tip = (
+            "Optional clean DAZ content library used for package validation and test installs; "
+            "not your main content library."
+        )
+        self.default_daz_library_edit.setToolTip(test_library_tip)
+        self.test_library_label = QLabel("Test library")
+        self.test_library_label.setToolTip(test_library_tip)
+        self.dim_downloads_folder_edit = QLineEdit(settings.dim_downloads_folder)
+        self.default_output_folder_edit = QLineEdit(settings.default_output_folder)
+        self.default_staging_folder_edit = QLineEdit(settings.default_staging_folder)
+        self.default_store_combo = QComboBox()
+        self.default_store_combo.setEditable(True)
+        self.default_store_combo.addItems([store.display_name for store in stores])
+        self.default_store_combo.setCurrentText(settings.default_store.display_name)
+        self.default_store_prefix_edit = QLineEdit(settings.default_store.dim_prefix)
+        self.next_product_number_edit = QLineEdit(str(settings.next_product_number))
+        self.lm_studio_base_url_edit = QLineEdit(settings.lm_studio_base_url)
+        self.ollama_base_url_edit = QLineEdit(settings.ollama_base_url)
+        self.preserve_staging_checkbox = QCheckBox("Keep staging folders after package builds")
+        self.preserve_staging_checkbox.setChecked(settings.preserve_staging)
+
+        self.default_store_combo.currentTextChanged.connect(self._default_store_changed)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
+        form.addRow(self.test_library_label, self._path_row(self.default_daz_library_edit, "Select Test Library"))
+        form.addRow("DIM downloads", self._path_row(self.dim_downloads_folder_edit, "Select DIM Downloads Folder"))
+        form.addRow("Package output", self._path_row(self.default_output_folder_edit, "Select Package Output Folder"))
+        form.addRow("Staging folder", self._path_row(self.default_staging_folder_edit, "Select Staging Folder"))
+        form.addRow("Default store", self.default_store_combo)
+        form.addRow("DIM prefix", self.default_store_prefix_edit)
+        form.addRow("Next product number", self.next_product_number_edit)
+        form.addRow("LM Studio URL", self.lm_studio_base_url_edit)
+        form.addRow("Ollama URL", self.ollama_base_url_edit)
+        form.addRow("", self.preserve_staging_checkbox)
+        layout.addLayout(form, 1)
+        layout.addWidget(buttons)
+
+    def to_settings(self) -> AppSettings:
+        store_name = self.default_store_combo.currentText().strip()
+        matching_store = self._matching_store(store_name)
+        return AppSettings(
+            default_store=StoreSettings(
+                display_name=store_name,
+                store_id=matching_store.store_id if matching_store is not None else store_name,
+                dim_prefix=self.default_store_prefix_edit.text().strip(),
+            ),
+            next_product_number=int(self.next_product_number_edit.text().strip()),
+            lm_studio_base_url=self.lm_studio_base_url_edit.text().strip(),
+            ollama_base_url=self.ollama_base_url_edit.text().strip(),
+            default_output_folder=self.default_output_folder_edit.text().strip(),
+            default_staging_folder=self.default_staging_folder_edit.text().strip(),
+            default_daz_library=self.default_daz_library_edit.text().strip(),
+            dim_downloads_folder=self.dim_downloads_folder_edit.text().strip(),
+            preserve_staging=self.preserve_staging_checkbox.isChecked(),
+        )
+
+    def _path_row(self, edit: QLineEdit, title: str) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        browse_button = QPushButton("Browse")
+        browse_button.clicked.connect(lambda: self._browse_folder(edit, title))
+        layout.addWidget(edit, 1)
+        layout.addWidget(browse_button)
+        return row
+
+    def _browse_folder(self, edit: QLineEdit, title: str) -> None:
+        folder = QFileDialog.getExistingDirectory(self, title, edit.text().strip())
+        if folder:
+            edit.setText(folder)
+
+    def _default_store_changed(self, store_name: str) -> None:
+        store = self._matching_store(store_name)
+        if store is None:
+            return
+        self.default_store_prefix_edit.setText(store.dim_prefix)
+
+    def _matching_store(self, value: str) -> StoreSettings | None:
+        key = value.strip().lower()
+        for store in self._stores:
+            if store.display_name.strip().lower() == key or store.store_id.strip().lower() == key:
+                return store
+        return None
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
         model_provider_factory: Callable[[str, str], MetadataSuggestionProvider] | None = None,
         available_model_providers: tuple[str, ...] | None = None,
         app_settings: AppSettings | None = None,
+        settings_path: Path | None = None,
         store_catalog_path: Path | None = None,
         run_analysis_synchronously: bool = False,
         output_folder_opener: Callable[[Path], None] | None = None,
@@ -141,6 +251,7 @@ class MainWindow(QMainWindow):
         self.analysis_worker: AnalysisWorker | None = None
         self.run_analysis_synchronously = run_analysis_synchronously
         self.app_settings = app_settings or AppSettings.defaults()
+        self.settings_path = settings_path or _default_settings_path()
         self.store_catalog_path = store_catalog_path or _default_store_catalog_path()
         self.store_catalog = list(load_store_catalog(self.store_catalog_path))
         self._syncing_product_fields = False
@@ -194,6 +305,10 @@ class MainWindow(QMainWindow):
         self.use_support_button = QPushButton("Use Support")
         self.mark_row_reviewed_button = QPushButton("Mark Row Reviewed")
         self.mark_issue_reviewed_button = QPushButton("Mark Issue Reviewed")
+        self.settings_button = QPushButton("⚙")
+        self.settings_button.setObjectName("settingsButton")
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.setFixedWidth(42)
         self.pose_source_edit = QLineEdit()
         self.pose_source_edit.setPlaceholderText("Select a Genesis 8 Female pose product zip or folder")
         self.pose_browse_source_button = QPushButton("Browse")
@@ -342,6 +457,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.dim_packager_page, "DIM Packager")
         self.pose_converter_page = PoseConverterPage(self)
         self.tabs.addTab(self.pose_converter_page, "Pose Converters")
+        self.tabs.setCornerWidget(self.settings_button, Qt.Corner.TopRightCorner)
 
     def _connect_signals(self) -> None:
         self.browse_button.clicked.connect(self._browse_source)
@@ -375,6 +491,7 @@ class MainWindow(QMainWindow):
         self.pose_source_edit.returnPressed.connect(self._pose_source_entered)
         self.pose_store_combo.currentTextChanged.connect(self._pose_store_changed)
         self.pose_generate_guid_button.clicked.connect(self.generate_pose_guid)
+        self.settings_button.clicked.connect(self.open_settings)
         self.table_view.selectionModel().currentRowChanged.connect(
             lambda current, previous: self.show_row_details(current.row())
         )
@@ -384,6 +501,35 @@ class MainWindow(QMainWindow):
         if folder:
             self.set_source_path(Path(folder))
             self.analyze_current_source()
+
+    def create_settings_dialog(self) -> SettingsDialog:
+        return SettingsDialog(self.app_settings, self.store_catalog, self)
+
+    def open_settings(self) -> None:
+        dialog = self.create_settings_dialog()
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.save_settings_from_dialog(dialog)
+
+    def save_settings_from_dialog(self, dialog: SettingsDialog) -> None:
+        try:
+            previous_settings = self.app_settings
+            self.app_settings = dialog.to_settings()
+        except ValueError as exc:
+            self._analysis_progress(f"Settings not saved: {exc}")
+            return
+        save_settings(self.settings_path, self.app_settings)
+        self._apply_settings_defaults_to_controls(previous_settings)
+        self._analysis_progress(f"Settings saved: {self.settings_path}")
+
+    def _apply_settings_defaults_to_controls(self, previous_settings: AppSettings) -> None:
+        if self.pose_store_combo.currentText().strip() in ("", previous_settings.default_store.display_name):
+            self.pose_store_combo.setCurrentText(self.app_settings.default_store.display_name)
+        if self.pose_store_prefix_edit.text().strip() in ("", previous_settings.default_store.dim_prefix):
+            self.pose_store_prefix_edit.setText(self.app_settings.default_store.dim_prefix)
+        if self.pose_store_code_edit.text().strip() in ("", previous_settings.default_store.default_code):
+            self.pose_store_code_edit.setText(self.app_settings.default_store.default_code)
+        if self.pose_token_edit.text().strip() in ("", str(previous_settings.next_product_number)):
+            self.pose_token_edit.setText(str(self.app_settings.next_product_number))
 
     def set_pose_source_path(self, path: Path) -> None:
         source = Path(path)
@@ -1015,6 +1161,11 @@ class MainWindow(QMainWindow):
                 border-color: #45645e;
                 color: #aeb8b5;
             }
+            QPushButton#settingsButton {
+                padding: 6px 10px;
+                font-size: 16px;
+                font-weight: 600;
+            }
             QPushButton#primaryPoseConvertButton {
                 background: #139a7f;
                 border-color: #20c8a7;
@@ -1355,6 +1506,10 @@ def _convert_pose_product_name_to_g9(name: str) -> str:
 
 def _default_store_catalog_path() -> Path:
     return Path(__file__).resolve().parents[2] / "config" / "stores.json"
+
+
+def _default_settings_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "config" / "settings.json"
 
 
 def _open_folder_with_desktop(path: Path) -> None:

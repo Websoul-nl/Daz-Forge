@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from forge.settings import (
@@ -6,6 +7,7 @@ from forge.settings import (
     default_store_catalog,
     load_settings,
     load_store_catalog,
+    save_settings,
     upsert_store,
 )
 
@@ -63,6 +65,20 @@ def test_load_settings_preserves_existing_values(tmp_path: Path) -> None:
     assert settings.default_store.dim_prefix == "RND"
     assert settings.next_product_number == 12345678
     assert settings.preserve_staging is True
+
+
+def test_save_settings_omits_store_code_from_global_default_store(tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = AppSettings(default_store=StoreSettings("Shards", "Shards", "SHA", default_code="WEB"))
+
+    save_settings(settings_path, settings)
+
+    raw = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert raw["default_store"] == {
+        "display_name": "Shards",
+        "store_id": "Shards",
+        "dim_prefix": "SHA",
+    }
 
 
 def test_default_store_catalog_contains_known_store_prefixes() -> None:

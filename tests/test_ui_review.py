@@ -23,6 +23,7 @@ from forge.ui.delegates import CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.pages.dim_packager_page import DimPackagerPage
 from forge.ui.pages.pose_converter_page import PoseConverterPage
 from forge.ui.review_model import ReviewTableModel
+from forge.settings import AppSettings, StoreSettings, load_settings
 
 
 @pytest.fixture(scope="session")
@@ -161,6 +162,93 @@ def test_main_window_adds_pose_converter_tab(qapp) -> None:
     assert _has_ancestor(window.pose_product_name_edit, window.pose_converter_page)
     assert _has_ancestor(window.pose_convert_button, window.pose_converter_page)
     assert window.pose_convert_button.objectName() == "primaryPoseConvertButton"
+
+
+def test_main_window_has_top_right_settings_button(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+
+    assert window.settings_button.text() == "⚙"
+    assert window.settings_button.toolTip() == "Settings"
+    assert window.tabs.cornerWidget(Qt.Corner.TopRightCorner) is window.settings_button
+
+
+def test_settings_dialog_saves_recommended_defaults(qapp, tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    window = MainWindow(
+        available_model_providers=(),
+        app_settings=AppSettings(
+            default_store=StoreSettings("LOCAL USER", "LOCAL USER", "LU"),
+            next_product_number=90000000,
+        ),
+        settings_path=settings_path,
+    )
+
+    dialog = window.create_settings_dialog()
+    dialog.default_daz_library_edit.setText(str(tmp_path / "Daz Library"))
+    dialog.dim_downloads_folder_edit.setText(str(tmp_path / "DIM Downloads"))
+    dialog.default_output_folder_edit.setText(str(tmp_path / "Package Output"))
+    dialog.default_staging_folder_edit.setText(str(tmp_path / "Staging"))
+    dialog.default_store_combo.setCurrentText("Renderosity")
+    dialog.default_store_prefix_edit.setText("RND")
+    dialog.next_product_number_edit.setText("90000042")
+    dialog.lm_studio_base_url_edit.setText("http://127.0.0.1:1234/v1")
+    dialog.ollama_base_url_edit.setText("http://127.0.0.1:11434")
+    dialog.preserve_staging_checkbox.setChecked(True)
+
+    window.save_settings_from_dialog(dialog)
+
+    saved = load_settings(settings_path)
+    assert saved.default_daz_library == str(tmp_path / "Daz Library")
+    assert saved.dim_downloads_folder == str(tmp_path / "DIM Downloads")
+    assert saved.default_output_folder == str(tmp_path / "Package Output")
+    assert saved.default_staging_folder == str(tmp_path / "Staging")
+    assert saved.default_store.display_name == "Renderosity"
+    assert saved.default_store.store_id == "Renderosity"
+    assert saved.default_store.dim_prefix == "RND"
+    assert saved.default_store.default_code == ""
+    assert saved.next_product_number == 90000042
+    assert saved.preserve_staging is True
+    assert window.app_settings == saved
+
+
+def test_settings_dialog_labels_daz_library_as_clean_test_library(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+
+    dialog = window.create_settings_dialog()
+
+    assert dialog.test_library_label.text() == "Test library"
+    assert "clean DAZ content library" in dialog.test_library_label.toolTip()
+    assert "not your main content library" in dialog.default_daz_library_edit.toolTip()
+    assert dialog.default_daz_library_edit.placeholderText() == "Optional clean DAZ test library"
+    assert not hasattr(dialog, "default_store_code_edit")
+
+
+def test_settings_save_does_not_overwrite_edited_pose_metadata(qapp, tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    window = MainWindow(
+        available_model_providers=(),
+        app_settings=AppSettings(
+            default_store=StoreSettings("LOCAL USER", "LOCAL USER", "LU"),
+            next_product_number=90000000,
+        ),
+        settings_path=settings_path,
+    )
+    window.pose_store_combo.setCurrentText("Custom Store")
+    window.pose_store_prefix_edit.setText("CST")
+    window.pose_store_code_edit.setText("CUSTOM")
+    window.pose_token_edit.setText("12345678")
+
+    dialog = window.create_settings_dialog()
+    dialog.default_store_combo.setCurrentText("Renderosity")
+    dialog.default_store_prefix_edit.setText("RND")
+    dialog.next_product_number_edit.setText("90000042")
+
+    window.save_settings_from_dialog(dialog)
+
+    assert window.pose_store_combo.currentText() == "Custom Store"
+    assert window.pose_store_prefix_edit.text() == "CST"
+    assert window.pose_store_code_edit.text() == "CUSTOM"
+    assert window.pose_token_edit.text() == "12345678"
 
 
 def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> None:

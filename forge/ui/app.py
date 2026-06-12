@@ -7,6 +7,7 @@ from typing import Sequence
 
 from PySide6.QtWidgets import QApplication
 
+from forge.settings import load_settings
 from forge.ui.main_window import MainWindow
 
 
@@ -16,7 +17,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    window = MainWindow()
+    settings_path = Path(__file__).resolve().parents[2] / "config" / "settings.json"
+    window = MainWindow(app_settings=load_settings(settings_path), settings_path=settings_path)
     if args.source is not None:
         window.set_source_path(args.source)
         window.analyze_current_source()

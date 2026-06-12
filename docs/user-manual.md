@@ -83,6 +83,14 @@ Store catalog entries live in `config/stores.json`. The DIM package prefix and D
 For example, a custom store can use a short DIM prefix but a longer Store ID.
 Artist-specific store codes belong on the product metadata fields for the package you are building, not in global settings.
 
+### Product Tokens
+
+Daz Forge treats product identity as the combination of Store ID and Product token. The same product token can be reused under a different store.
+
+When source Smart Content contains a product token, Daz Forge reuses that token by default. If no source token is available, Daz Forge assigns `next_product_number`, remembers the assignment in `config/product-tokens.json`, and increments the next number after a successful build.
+
+`config/product-tokens.json` is local machine state and is ignored by git, like `config/settings.json`.
+
 ## DIM Packager Workflow
 
 1. Open the `DIM Packager` tab.
@@ -126,23 +134,33 @@ If the source has a support image, Daz Forge can reuse it. Otherwise choose an i
 ## Pose Converter Workflow
 
 1. Open the `Pose Converters` tab.
-2. Select a Genesis 8 Female pose product zip or unpacked folder.
-3. Choose an output folder.
-4. Check product metadata:
+2. Choose a conversion preset:
+   - `Genesis 8 -> Genesis 9`
+   - `Genesis 9 -> Genesis 8 Female`
+   - `Genesis 9 -> Genesis 8 Male`
+   - `Genesis 9 -> Genesis 8 Female + Male`
+   - `Genesis 9 -> Genesis 8 Merged`
+3. Select a pose product zip or unpacked folder.
+4. Choose an output folder.
+5. Check product metadata:
    - Product name
    - Store
    - Token
    - GUID
-   - Artists
-5. Click `Build Converted DIM Package`.
+6. Click `Build Converted DIM Package`.
 
 The converter:
 
-- Finds pose `.duf` files under Genesis 8 Female pose folders.
-- Converts mapped Genesis 8 Female bone channels to Genesis 9 bone channels.
+- Finds pose `.duf` files under the selected source figure folders.
+- Converts mapped Genesis 8 and Genesis 9 pose bone channels in the selected direction.
+- Copies artists from the original support metadata when available.
 - Preserves character/root translations and rotations.
 - Copies matching `.duf.png` and `.tip.png` thumbnails.
-- Builds a new DIM zip for the converted Genesis 9 pose product.
+- Builds a new DIM zip for the converted pose product.
+
+For `Genesis 8 -> Genesis 9`, Genesis 8 Female and Genesis 8 Male source poses both land under `People/Genesis 9/Poses`. If matching Female and Male inputs would create the same output file, Daz Forge adds `_F` and `_M` suffixes.
+
+For Genesis 9 to Genesis 8, choose whether to create Female, Male, both separate target folders, or a merged `People/Genesis 8/Poses` output.
 
 The converter is not a perfect substitute for a DAZ-authored converter. Test a few poses visually in DAZ Studio.
 

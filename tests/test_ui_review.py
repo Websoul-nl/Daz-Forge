@@ -503,6 +503,38 @@ def test_pose_converter_does_not_advance_generated_token_when_registry_recording
     assert not settings_path.exists()
 
 
+def test_pose_converter_increments_next_number_only_for_new_generated_token(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "Loose Counter Poses"
+    source.mkdir()
+    write_file(source / "People" / "Genesis 8 Female" / "Poses" / "Loose" / "Pose.duf", "{}")
+    settings_path = tmp_path / "settings.json"
+    output = tmp_path / "out"
+    calls = {}
+
+    def fake_builder(source_path, output_path, *, metadata, preset=PoseConversionPreset.G8_TO_G9):
+        calls["metadata"] = metadata
+        return SimpleNamespace(
+            conversion_report=SimpleNamespace(converted_count=1, skipped_count=0),
+            package=SimpleNamespace(zip_path=output_path / "LU90000000-01_LooseCounterPoses.zip"),
+        )
+
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=settings_path,
+        store_catalog_path=tmp_path / "stores.json",
+        token_registry_path=tmp_path / "tokens.json",
+        pose_package_builder=fake_builder,
+    )
+
+    window.set_pose_source_path(source)
+    window.pose_output_edit.setText(str(output))
+    window.build_pose_converter_package()
+
+    assert calls["metadata"]["product_token"] == "90000000"
+    assert window.app_settings.next_product_number == 90000001
+    assert load_settings(settings_path).next_product_number == 90000001
+
+
 def test_pose_converter_manual_token_does_not_block_new_source_token(qapp, tmp_path: Path) -> None:
     first_source = tmp_path / "Manual Token Poses"
     first_source.mkdir()

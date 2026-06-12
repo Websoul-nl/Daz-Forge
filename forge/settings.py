@@ -27,12 +27,12 @@ class StoreSettings:
 class AppSettings:
     default_store: StoreSettings = field(
         default_factory=lambda: StoreSettings(
-            display_name="Websoul",
-            store_id="WEBSOUL",
-            dim_prefix="WEB",
+            display_name="LOCAL USER",
+            store_id="LOCAL USER",
+            dim_prefix="LU",
         )
     )
-    next_product_number: int = 24156030
+    next_product_number: int = 90000000
     lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_output_folder: str = ""
@@ -94,8 +94,10 @@ def default_store_catalog() -> tuple[StoreSettings, ...]:
     return (
         StoreSettings(display_name="DAZ 3D", store_id="DAZ 3D", dim_prefix="IM"),
         StoreSettings(display_name="LOCAL USER", store_id="LOCAL USER", dim_prefix="LU"),
-        StoreSettings(display_name="Websoul", store_id="WEBSOUL", dim_prefix="WEB"),
-        StoreSettings(display_name="3D SHARDS", store_id="3D SHARDS", dim_prefix="SHA"),
+        StoreSettings(display_name="Renderosity", store_id="Renderosity", dim_prefix="RND"),
+        StoreSettings(display_name="Renderhub", store_id="Renderhub", dim_prefix="RHB"),
+        StoreSettings(display_name="CGTrader", store_id="CGTrader", dim_prefix="CGT"),
+        StoreSettings(display_name="DeviantArt", store_id="DeviantArt", dim_prefix="DA"),
     )
 
 

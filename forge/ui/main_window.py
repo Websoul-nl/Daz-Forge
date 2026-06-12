@@ -216,7 +216,7 @@ class MainWindow(QMainWindow):
         self.pose_guid_edit = QLineEdit(str(uuid4()))
         self.pose_guid_edit.setPlaceholderText("GUID")
         self.pose_generate_guid_button = QPushButton("Generate")
-        self.pose_artists_edit = QLineEdit(self.app_settings.default_store.display_name)
+        self.pose_artists_edit = QLineEdit()
         self.pose_artists_edit.setPlaceholderText("Artists")
         self.pose_convert_button = QPushButton("Build Converted DIM Package")
         self.pose_convert_button.setObjectName("primaryPoseConvertButton")

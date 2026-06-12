@@ -3,13 +3,13 @@
   "default_output_folder": "",
   "default_staging_folder": "",
   "default_store": {
-    "dim_prefix": "WEB",
-    "display_name": "Websoul",
-    "store_id": "WEBSOUL"
+    "dim_prefix": "LU",
+    "display_name": "LOCAL USER",
+    "store_id": "LOCAL USER"
   },
   "dim_downloads_folder": "",
   "lm_studio_base_url": "http://127.0.0.1:1234/v1",
-  "next_product_number": 24156030,
+  "next_product_number": 90000000,
   "ollama_base_url": "http://127.0.0.1:11434",
   "preserve_staging": false
 }

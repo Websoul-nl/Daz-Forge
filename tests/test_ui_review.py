@@ -194,17 +194,17 @@ def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -
         calls["metadata"] = metadata
         return SimpleNamespace(
             conversion_report=SimpleNamespace(converted_count=24, skipped_count=0),
-            package=SimpleNamespace(zip_path=output_path / "WEB24156031-01_RoadTripPosesforGenesis9.zip"),
+            package=SimpleNamespace(zip_path=output_path / "RND90000001-01_RoadTripPosesforGenesis9.zip"),
         )
 
     window = MainWindow(available_model_providers=(), pose_package_builder=fake_builder)
     window.set_pose_source_path(source)
     window.pose_output_edit.setText(str(output))
     window.pose_product_name_edit.setText("Road Trip Poses for Genesis 9")
-    window.pose_store_combo.setCurrentText("Websoul")
-    window.pose_store_prefix_edit.setText("WEB")
+    window.pose_store_combo.setCurrentText("Renderosity")
+    window.pose_store_prefix_edit.setText("RND")
     window.pose_store_code_edit.setText("")
-    window.pose_token_edit.setText("24156031")
+    window.pose_token_edit.setText("90000001")
     stale_guid = "11111111-2222-4333-8444-555555555555"
     window.pose_guid_edit.setText(stale_guid)
     window.pose_artists_edit.setText("Websoul")
@@ -214,14 +214,14 @@ def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -
     assert calls["source"] == source
     assert calls["output"] == output
     assert calls["metadata"]["product_name"] == "Road Trip Poses for Genesis 9"
-    assert calls["metadata"]["store_id"] == "WEBSOUL"
-    assert calls["metadata"]["store_prefix"] == "WEB"
-    assert calls["metadata"]["product_token"] == "24156031"
+    assert calls["metadata"]["store_id"] == "Renderosity"
+    assert calls["metadata"]["store_prefix"] == "RND"
+    assert calls["metadata"]["product_token"] == "90000001"
     assert calls["metadata"]["global_id"] != stale_guid
     assert calls["metadata"]["global_id"] == window.pose_guid_edit.text()
     assert calls["metadata"]["artists"] == ["Websoul"]
     assert "Converted 24 pose file(s)" in window.pose_status_text.toPlainText()
-    assert "WEB24156031-01_RoadTripPosesforGenesis9.zip" in window.pose_status_text.toPlainText()
+    assert "RND90000001-01_RoadTripPosesforGenesis9.zip" in window.pose_status_text.toPlainText()
 
 
 def test_pose_converter_prefills_readable_product_name_from_support_file(qapp, tmp_path: Path) -> None:
@@ -454,13 +454,13 @@ def test_main_window_prefills_product_metadata_fields(qapp, tmp_path: Path) -> N
     window.analyze_current_source()
 
     assert window.product_name_edit.text() == "Hero Product"
-    assert window.store_combo.currentText() == "Websoul"
-    assert window.store_prefix_edit.text() == "WEB"
+    assert window.store_combo.currentText() == "LOCAL USER"
+    assert window.store_prefix_edit.text() == "LU"
     assert window.store_code_edit.text() == ""
-    assert window.token_edit.text() == "24156030"
+    assert window.token_edit.text() == "90000000"
     assert window.artists_edit.text() == "Websoul"
     assert re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", window.guid_edit.text())
-    assert window.current_contract["product"]["product_token"] == "24156030"
+    assert window.current_contract["product"]["product_token"] == "90000000"
     assert window.current_contract["product"]["global_id"] == window.guid_edit.text()
 
 
@@ -492,12 +492,12 @@ def test_main_window_store_dropdown_fills_prefix_field(qapp) -> None:
     window = MainWindow(available_model_providers=())
     window.set_contract(manual_payload())
 
-    window.store_combo.setCurrentText("3D SHARDS")
+    window.store_combo.setCurrentText("Renderosity")
 
-    assert window.store_prefix_edit.text() == "SHA"
-    assert window.current_contract["product"]["store_display_name"] == "3D SHARDS"
-    assert window.current_contract["product"]["store_id"] == "3D SHARDS"
-    assert window.current_contract["product"]["store_prefix"] == "SHA"
+    assert window.store_prefix_edit.text() == "RND"
+    assert window.current_contract["product"]["store_display_name"] == "Renderosity"
+    assert window.current_contract["product"]["store_id"] == "Renderosity"
+    assert window.current_contract["product"]["store_prefix"] == "RND"
 
 
 def test_main_window_can_generate_new_product_guid(qapp) -> None:

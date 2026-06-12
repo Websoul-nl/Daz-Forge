@@ -46,7 +46,7 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
             "store_id": "WEBSOUL",
             "store_prefix": "WEB",
             "store_code": "",
-            "product_token": "24156030",
+            "product_token": "90000000",
             "global_id": "11111111-2222-4333-8444-555555555555",
             "artists": ["Websoul"],
             "primary_artist": "Websoul",
@@ -56,8 +56,8 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
 
     result = build_dim_package(scan_source(source), contract, output)
 
-    assert result.zip_path.name == "WEB24156030-01_HeroProduct.zip"
-    assert result.report_path.name == "WEB24156030-01_HeroProduct.report.json"
+    assert result.zip_path.name == "WEB90000000-01_HeroProduct.zip"
+    assert result.report_path.name == "WEB90000000-01_HeroProduct.report.json"
     with ZipFile(result.zip_path) as archive:
         names = set(archive.namelist())
         assert "Manifest.dsx" in names
@@ -65,44 +65,44 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         assert "Content/Props/Websoul/Hero Prop.duf" in names
         assert "Content/Props/Websoul/Hero Prop.duf.png" in names
         assert "Content/Runtime/Textures/Websoul/Hero.jpg" in names
-        assert "Content/Runtime/Support/WEBSOUL_24156030_Hero_Product.dsx" in names
-        assert "Content/Runtime/Support/WEBSOUL_24156030_Hero_Product.dsa" in names
-        assert "Content/Runtime/Support/WEBSOUL_24156030_Hero_Product.jpg" in names
+        assert "Content/Runtime/Support/WEBSOUL_90000000_Hero_Product.dsx" in names
+        assert "Content/Runtime/Support/WEBSOUL_90000000_Hero_Product.dsa" in names
+        assert "Content/Runtime/Support/WEBSOUL_90000000_Hero_Product.jpg" in names
         assert "Content/Runtime/Support/OLD_1_Old.dsx" not in names
         assert "Content/Runtime/Support/OLD_1_Old.dsa" not in names
         assert "Content/Runtime/Support/OLD_1_Old.jpg" not in names
-        assert archive.read("Content/Runtime/Support/WEBSOUL_24156030_Hero_Product.jpg") == b"old image"
-        support_script = archive.read("Content/Runtime/Support/WEBSOUL_24156030_Hero_Product.dsa").decode("utf-8")
+        assert archive.read("Content/Runtime/Support/WEBSOUL_90000000_Hero_Product.jpg") == b"old image"
+        support_script = archive.read("Content/Runtime/Support/WEBSOUL_90000000_Hero_Product.dsa").decode("utf-8")
         assert 'createStore("WEBSOUL", "", "")' in support_script
         assert "queueDBMetaFile" in support_script
 
         manifest = archive.read("Manifest.dsx").decode("utf-8")
         assert 'GlobalID VALUE="11111111-2222-4333-8444-555555555555"' in manifest
-        assert 'VALUE="Content/Runtime/Support/WEBSOUL_24156030_Hero_Product.dsx"' in manifest
-        assert 'VALUE="Content/Runtime/Support/WEBSOUL_24156030_Hero_Product.dsa"' in manifest
+        assert 'VALUE="Content/Runtime/Support/WEBSOUL_90000000_Hero_Product.dsx"' in manifest
+        assert 'VALUE="Content/Runtime/Support/WEBSOUL_90000000_Hero_Product.dsa"' in manifest
 
         supplement = archive.read("Supplement.dsx").decode("utf-8")
         assert 'ProductName VALUE="Hero Product"' in supplement
 
-        support = archive.read("Content/Runtime/Support/WEBSOUL_24156030_Hero_Product.dsx").decode("utf-8")
+        support = archive.read("Content/Runtime/Support/WEBSOUL_90000000_Hero_Product.dsx").decode("utf-8")
         assert '<Product VALUE="Hero Product">' in support
         assert '<StoreID VALUE="WEBSOUL"/>' in support
-        assert '<ProductToken VALUE="24156030"/>' in support
+        assert '<ProductToken VALUE="90000000"/>' in support
         assert '<Artist VALUE="Websoul"/>' in support
         assert '<Asset VALUE="/Props/Websoul/Hero Prop.duf">' in support
         assert '<ContentType VALUE="Set"/>' in support
         assert '<Category VALUE="/Default/Props"/>' in support
-        assert '<SupportAssets VALUE="/Runtime/Support/WEBSOUL_24156030_Hero_Product.dsx">' in support
+        assert '<SupportAssets VALUE="/Runtime/Support/WEBSOUL_90000000_Hero_Product.dsx">' in support
         assert '<SupportAsset VALUE="/Props/Websoul/Hero Prop.duf"/>' in support
         assert '<SupportAsset VALUE="/Props/Websoul/Hero Prop.duf.png"/>' in support
-        assert '<SupportAsset VALUE="/Runtime/Support/WEBSOUL_24156030_Hero_Product.jpg"/>' in support
+        assert '<SupportAsset VALUE="/Runtime/Support/WEBSOUL_90000000_Hero_Product.jpg"/>' in support
         assert '<SupportAsset VALUE="/Runtime/Textures/Websoul/Hero.jpg"/>' in support
 
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
-    assert report["zip_name"] == "WEB24156030-01_HeroProduct.zip"
+    assert report["zip_name"] == "WEB90000000-01_HeroProduct.zip"
     assert report["package_code"] == "WEB"
     assert report["support_store_name"] == "WEBSOUL"
-    assert report["product_image_path"] == "Runtime/Support/WEBSOUL_24156030_Hero_Product.jpg"
+    assert report["product_image_path"] == "Runtime/Support/WEBSOUL_90000000_Hero_Product.jpg"
     assert report["skipped_existing_support_files"] == [
         "Runtime/Support/OLD_1_Old.dsa",
         "Runtime/Support/OLD_1_Old.dsx",

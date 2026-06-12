@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from forge.settings import (
     AppSettings,
@@ -10,15 +10,15 @@ from forge.settings import (
 )
 
 
-def test_default_settings_match_robert_defaults() -> None:
+def test_default_settings_use_share_safe_local_user_defaults() -> None:
     settings = AppSettings.defaults()
 
     assert settings.default_store == StoreSettings(
-        display_name="Websoul",
-        store_id="WEBSOUL",
-        dim_prefix="WEB",
+        display_name="LOCAL USER",
+        store_id="LOCAL USER",
+        dim_prefix="LU",
     )
-    assert settings.next_product_number == 24156030
+    assert settings.next_product_number == 90000000
     assert settings.lm_studio_base_url == "http://127.0.0.1:1234/v1"
     assert settings.preserve_staging is False
 
@@ -29,9 +29,9 @@ def test_load_settings_creates_file_when_missing(tmp_path: Path) -> None:
     settings = load_settings(settings_path)
 
     assert settings_path.exists()
-    assert settings.default_store.store_id == "WEBSOUL"
-    assert settings.default_store.dim_prefix == "WEB"
-    assert settings.next_product_number == 24156030
+    assert settings.default_store.store_id == "LOCAL USER"
+    assert settings.default_store.dim_prefix == "LU"
+    assert settings.next_product_number == 90000000
 
 
 def test_load_settings_preserves_existing_values(tmp_path: Path) -> None:
@@ -70,8 +70,10 @@ def test_default_store_catalog_contains_known_store_prefixes() -> None:
 
     assert stores["DAZ 3D"].dim_prefix == "IM"
     assert stores["LOCAL USER"].dim_prefix == "LU"
-    assert stores["Websoul"].dim_prefix == "WEB"
-    assert stores["3D SHARDS"].dim_prefix == "SHA"
+    assert stores["Renderosity"].dim_prefix == "RND"
+    assert stores["Renderhub"].dim_prefix == "RHB"
+    assert stores["CGTrader"].dim_prefix == "CGT"
+    assert stores["DeviantArt"].dim_prefix == "DA"
 
 
 def test_load_store_catalog_creates_json_when_missing(tmp_path: Path) -> None:
@@ -80,7 +82,14 @@ def test_load_store_catalog_creates_json_when_missing(tmp_path: Path) -> None:
     stores = load_store_catalog(catalog_path)
 
     assert catalog_path.exists()
-    assert [store.display_name for store in stores] == ["DAZ 3D", "LOCAL USER", "Websoul", "3D SHARDS"]
+    assert [store.display_name for store in stores] == [
+        "DAZ 3D",
+        "LOCAL USER",
+        "Renderosity",
+        "Renderhub",
+        "CGTrader",
+        "DeviantArt",
+    ]
 
 
 def test_upsert_store_adds_and_updates_store_catalog(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 import gzip
 import json
+import os
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -10,7 +11,7 @@ from forge.pose_converter.duf import load_duf, save_duf
 from forge.pose_converter.product import build_converted_pose_dim_package, convert_pose_product
 
 
-SAMPLES = Path("D:/Software projects/daz-forge/.codex-local/dim-samples")
+SAMPLES = Path(os.environ.get("DAZ_FORGE_SAMPLES", Path(__file__).resolve().parents[1] / ".codex-local" / "dim-samples"))
 ROAD_TRIP_ZIP = SAMPLES / "IM00083577-01_RoadTripPosesforGenesis8Female.zip"
 ROAD_TRIP_G8_PATH = "Content/People/Genesis 8 Female/Poses/Road Trip Poses for Genesis 8 Female/Road Trip 01.duf"
 ROAD_TRIP_G9_PATH = SAMPLES / "Road Trip 01 G9.duf"
@@ -172,7 +173,7 @@ def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None
             "store_display_name": "Websoul",
             "store_id": "WEBSOUL",
             "store_prefix": "WEB",
-            "product_token": "24156031",
+            "product_token": "90000001",
             "global_id": "11111111-2222-4333-8444-555555555555",
             "artists": ["Websoul"],
             "primary_artist": "Websoul",
@@ -180,7 +181,7 @@ def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None
     )
 
     assert result.conversion_report.converted_count == 24
-    assert result.package.zip_path.name == "WEB24156031-01_RoadTripPosesforGenesis9.zip"
+    assert result.package.zip_path.name == "WEB90000001-01_RoadTripPosesforGenesis9.zip"
     assert result.package.report_path.exists()
     assert result.converted_folder.exists()
 
@@ -197,23 +198,23 @@ def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None
             "Content/People/Genesis 8 Female/Poses/"
             "Road Trip Poses for Genesis 8 Female/Road Trip 01.duf"
         ) not in names
-        assert "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsx" in names
-        assert "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsa" in names
-        assert "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.jpg" in names
+        assert "Content/Runtime/Support/WEBSOUL_90000001_Road_Trip_Poses_for_Genesis_9.dsx" in names
+        assert "Content/Runtime/Support/WEBSOUL_90000001_Road_Trip_Poses_for_Genesis_9.dsa" in names
+        assert "Content/Runtime/Support/WEBSOUL_90000001_Road_Trip_Poses_for_Genesis_9.jpg" in names
 
         support = archive.read(
-            "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsx"
+            "Content/Runtime/Support/WEBSOUL_90000001_Road_Trip_Poses_for_Genesis_9.dsx"
         ).decode("utf-8")
         support_script = archive.read(
-            "Content/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsa"
+            "Content/Runtime/Support/WEBSOUL_90000001_Road_Trip_Poses_for_Genesis_9.dsa"
         ).decode("utf-8")
         assert '<Product VALUE="Road Trip Poses for Genesis 9">' in support
         assert f'<Asset VALUE="/{converted_pose.removeprefix("Content/")}">' in support
         assert '<ContentType VALUE="Preset/Pose"/>' in support
         assert '<Compatibility VALUE="/Genesis 9/Base"/>' in support
-        assert '<SupportAssets VALUE="/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.dsx">' in support
+        assert '<SupportAssets VALUE="/Runtime/Support/WEBSOUL_90000001_Road_Trip_Poses_for_Genesis_9.dsx">' in support
         assert f'<SupportAsset VALUE="/{converted_pose.removeprefix("Content/")}"/>' in support
-        assert '<SupportAsset VALUE="/Runtime/Support/WEBSOUL_24156031_Road_Trip_Poses_for_Genesis_9.jpg"/>' in support
+        assert '<SupportAsset VALUE="/Runtime/Support/WEBSOUL_90000001_Road_Trip_Poses_for_Genesis_9.jpg"/>' in support
         assert "queueDBMetaFile" in support_script
 
 

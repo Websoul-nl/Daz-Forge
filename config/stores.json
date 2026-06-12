@@ -14,15 +14,27 @@
     },
     {
       "default_code": "",
-      "dim_prefix": "WEB",
-      "display_name": "Websoul",
-      "store_id": "WEBSOUL"
+      "dim_prefix": "RND",
+      "display_name": "Renderosity",
+      "store_id": "Renderosity"
     },
     {
       "default_code": "",
-      "dim_prefix": "SHA",
-      "display_name": "3D SHARDS",
-      "store_id": "3D SHARDS"
+      "dim_prefix": "RHB",
+      "display_name": "Renderhub",
+      "store_id": "Renderhub"
+    },
+    {
+      "default_code": "",
+      "dim_prefix": "CGT",
+      "display_name": "CGTrader",
+      "store_id": "CGTrader"
+    },
+    {
+      "default_code": "",
+      "dim_prefix": "DA",
+      "display_name": "DeviantArt",
+      "store_id": "DeviantArt"
     }
   ]
 }

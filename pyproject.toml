@@ -1,7 +1,7 @@
 [project]
 name = "daz-forge"
 version = "0.1.0"
-description = "Personal DAZ Smart Content analyzer and DIM packaging helper"
+description = "DAZ Smart Content analyzer, DIM packaging helper, and pose conversion tool"
 requires-python = ">=3.12"
 dependencies = [
     "PySide6>=6.11",

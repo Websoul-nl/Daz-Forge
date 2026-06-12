@@ -27,6 +27,11 @@ class PoseConverterPage(QWidget):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
+        preset_bar = QHBoxLayout()
+        preset_bar.addWidget(QLabel("Convert poses"))
+        preset_bar.addWidget(controller.pose_preset_combo, 1)
+        layout.addLayout(preset_bar)
+
         source_bar = QHBoxLayout()
         source_bar.addWidget(controller.pose_source_edit, 1)
         source_bar.addWidget(controller.pose_browse_source_button)
@@ -59,8 +64,6 @@ class PoseConverterPage(QWidget):
         guid_bar.addWidget(controller.pose_guid_edit, 1)
         guid_bar.addWidget(controller.pose_generate_guid_button)
         metadata_layout.addLayout(guid_bar, 3, 3)
-        metadata_layout.addWidget(QLabel("Artists"), 4, 0)
-        metadata_layout.addWidget(controller.pose_artists_edit, 4, 1, 1, 3)
         metadata_layout.setColumnStretch(1, 1)
         metadata_layout.setColumnStretch(3, 1)
         layout.addWidget(metadata_panel)

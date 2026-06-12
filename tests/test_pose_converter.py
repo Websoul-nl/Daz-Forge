@@ -6,7 +6,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from forge.pose_converter.converter import convert_g8f_pose_to_g9
+from forge.pose_converter.converter import PoseConversionPreset, convert_g8f_pose_to_g9, convert_pose
 from forge.pose_converter.duf import load_duf, save_duf
 from forge.pose_converter.product import build_converted_pose_dim_package, convert_pose_product
 
@@ -32,6 +32,44 @@ def test_load_and_save_plain_and_gzip_duf_round_trip(tmp_path: Path) -> None:
     assert load_duf(plain_path) == pose
     assert load_duf(gzip_path) == pose
     assert gzip.decompress(gzip_path.read_bytes()).startswith(b"{")
+
+
+def test_conversion_preset_labels_are_stable() -> None:
+    assert [preset.label for preset in PoseConversionPreset] == [
+        "Genesis 8 -> Genesis 9",
+        "Genesis 9 -> Genesis 8 Female",
+        "Genesis 9 -> Genesis 8 Male",
+        "Genesis 9 -> Genesis 8 Female + Male",
+        "Genesis 9 -> Genesis 8 Merged",
+    ]
+
+
+def test_convert_g9_pose_to_g8_inverts_representative_channels() -> None:
+    pose = {
+        "file_version": "0.6.1.0",
+        "asset_info": {"id": "/People/Genesis%209/Poses/Carry/Pose.duf", "type": "preset_pose"},
+        "scene": {
+            "animations": [
+                {"url": "name://@selection:?translation/x/value", "keys": [[0, 11]]},
+                {"url": "name://@selection/hip:?translation/y/value", "keys": [[0, -4]]},
+                {"url": "name://@selection/l_thigh:?rotation/z/value", "keys": [[0, 16]]},
+                {"url": "name://@selection/l_upperarm:?rotation/x/value", "keys": [[0, 25]]},
+                {"url": "name://@selection/l_forearm:?rotation/y/value", "keys": [[0, 30]]},
+                {"url": "name://@selection/l_index1:?rotation/x/value", "keys": [[0, 5]]},
+            ]
+        },
+    }
+
+    result = convert_pose(pose, PoseConversionPreset.G9_TO_G8_FEMALE)
+    converted = _meaningful_animation_map(result.pose)
+
+    assert converted[("", "translation", "x")] == 11
+    assert converted[("hip", "translation", "y")] == -4
+    assert converted[("lThighBend", "rotation", "z")] == 10
+    assert converted[("lShldrBend", "rotation", "x")] == 25
+    assert converted[("lForearmBend", "rotation", "y")] == 30
+    assert converted[("lIndex1", "rotation", "x")] == 5
+    assert "Genesis%208%20Female" in result.pose["asset_info"]["id"]
 
 
 def test_convert_road_trip_01_matches_key_g9_calibration_values() -> None:
@@ -161,6 +199,60 @@ def test_convert_pose_product_folder_source(tmp_path: Path) -> None:
     ).exists()
 
 
+def test_convert_g9_product_writes_female_male_and_merged_targets(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    pose_path = source_dir / "Content" / "People" / "Genesis 9" / "Poses" / "CarryG9" / "Carry 01.duf"
+    save_duf(_synthetic_pose("/People/Genesis%209/Poses/CarryG9/Carry%2001.duf"), pose_path, compressed=False)
+
+    female_output = tmp_path / "female"
+    male_output = tmp_path / "male"
+    both_output = tmp_path / "both"
+    merged_output = tmp_path / "merged"
+
+    female_report = convert_pose_product(source_dir, female_output, preset=PoseConversionPreset.G9_TO_G8_FEMALE)
+    male_report = convert_pose_product(source_dir, male_output, preset=PoseConversionPreset.G9_TO_G8_MALE)
+    both_report = convert_pose_product(source_dir, both_output, preset=PoseConversionPreset.G9_TO_G8_BOTH)
+    merged_report = convert_pose_product(source_dir, merged_output, preset=PoseConversionPreset.G9_TO_G8_MERGED)
+
+    assert female_report.converted_count == 1
+    assert (female_output / "Content" / "People" / "Genesis 8 Female" / "Poses" / "CarryG8F" / "Carry 01.duf").exists()
+    assert male_report.converted_count == 1
+    assert (male_output / "Content" / "People" / "Genesis 8 Male" / "Poses" / "CarryG8M" / "Carry 01.duf").exists()
+    assert both_report.converted_count == 2
+    assert (both_output / "Content" / "People" / "Genesis 8 Female" / "Poses" / "CarryG8F" / "Carry 01.duf").exists()
+    assert (both_output / "Content" / "People" / "Genesis 8 Male" / "Poses" / "CarryG8M" / "Carry 01.duf").exists()
+    assert merged_report.converted_count == 1
+    assert (merged_output / "Content" / "People" / "Genesis 8" / "Poses" / "CarryG8" / "Carry 01.duf").exists()
+
+
+def test_convert_g8_male_and_female_inputs_land_in_g9_with_collision_suffixes(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    female_pose = (
+        source_dir
+        / "Content"
+        / "People"
+        / "Genesis 8 Female"
+        / "Poses"
+        / "Carry"
+        / "Carry 01.duf"
+    )
+    male_pose = source_dir / "Content" / "People" / "Genesis 8 Male" / "Poses" / "Carry" / "Carry 01.duf"
+    save_duf(_synthetic_pose("/People/Genesis%208%20Female/Poses/Carry/Carry%2001.duf"), female_pose, compressed=False)
+    save_duf(_synthetic_pose("/People/Genesis%208%20Male/Poses/Carry/Carry%2001.duf"), male_pose, compressed=False)
+    write_file(female_pose.with_suffix(".duf.png"), b"female-thumbnail")
+    write_file(male_pose.with_suffix(".duf.png"), b"male-thumbnail")
+
+    output_dir = tmp_path / "converted"
+
+    report = convert_pose_product(source_dir, output_dir, preset=PoseConversionPreset.G8_TO_G9)
+
+    assert report.converted_count == 2
+    assert (output_dir / "Content" / "People" / "Genesis 9" / "Poses" / "Carry" / "Carry 01_F.duf").exists()
+    assert (output_dir / "Content" / "People" / "Genesis 9" / "Poses" / "Carry" / "Carry 01_M.duf").exists()
+    assert (output_dir / "Content" / "People" / "Genesis 9" / "Poses" / "Carry" / "Carry 01_F.duf.png").read_bytes() == b"female-thumbnail"
+    assert (output_dir / "Content" / "People" / "Genesis 9" / "Poses" / "Carry" / "Carry 01_M.duf.png").read_bytes() == b"male-thumbnail"
+
+
 def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None:
     _require_road_trip_samples()
     output_dir = tmp_path / "packages"
@@ -218,6 +310,88 @@ def test_build_converted_pose_dim_package_writes_dim_zip(tmp_path: Path) -> None
         assert "queueDBMetaFile" in support_script
 
 
+def test_build_converted_pose_dim_package_accepts_reverse_preset(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    pose_path = source_dir / "Content" / "People" / "Genesis 9" / "Poses" / "CarryG9" / "Carry 01.duf"
+    save_duf(_synthetic_pose("/People/Genesis%209/Poses/CarryG9/Carry%2001.duf"), pose_path, compressed=False)
+    output_dir = tmp_path / "packages"
+
+    result = build_converted_pose_dim_package(
+        source_dir,
+        output_dir,
+        preset=PoseConversionPreset.G9_TO_G8_MERGED,
+        metadata={
+            "product_name": "Carry Poses for Genesis 8",
+            "store_display_name": "Websoul",
+            "store_id": "WEBSOUL",
+            "store_prefix": "WEB",
+            "product_token": "90000002",
+            "global_id": "11111111-2222-4333-8444-555555555555",
+            "artists": ["Websoul"],
+            "primary_artist": "Websoul",
+        },
+    )
+
+    with ZipFile(result.package.zip_path) as archive:
+        names = set(archive.namelist())
+        converted_pose = "Content/People/Genesis 8/Poses/CarryG8/Carry 01.duf"
+        assert converted_pose in names
+        support = archive.read("Content/Runtime/Support/WEBSOUL_90000002_Carry_Poses_for_Genesis_8.dsx").decode("utf-8")
+        assert '<Product VALUE="Carry Poses for Genesis 8">' in support
+        assert f'<Asset VALUE="/{converted_pose.removeprefix("Content/")}">' in support
+
+
+def test_build_converted_pose_dim_package_copies_artists_from_source_support(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    pose_path = (
+        source_dir
+        / "Content"
+        / "People"
+        / "Genesis 9"
+        / "Poses"
+        / "FNTitanMkActionPose"
+        / "Pose 01.duf"
+    )
+    save_duf(_synthetic_pose("/People/Genesis%209/Poses/FNTitanMkActionPose/Pose%2001.duf"), pose_path, compressed=False)
+    write_text(
+        source_dir / "Content" / "Runtime" / "Support" / "DAZ_3D_112833_FN_Titan_Mk_Action_Pose_for_Genesis_9.dsx",
+        """
+        <ContentDBInstall VERSION="1.0">
+          <Products>
+            <Product VALUE="FN Titan Mk Action Pose for Genesis 9">
+              <Artists>
+                <Artist VALUE="FenixPhoenix"/>
+                <Artist VALUE="Daz Originals"/>
+              </Artists>
+            </Product>
+          </Products>
+        </ContentDBInstall>
+        """,
+    )
+
+    result = build_converted_pose_dim_package(
+        source_dir,
+        tmp_path / "packages",
+        metadata={
+            "product_name": "FN Titan Mk Action Pose for Genesis 8 Female",
+            "store_display_name": "DAZ 3D",
+            "store_id": "DAZ 3D",
+            "store_prefix": "IM",
+            "product_token": "112833",
+            "global_id": "11111111-2222-4333-8444-555555555555",
+        },
+        preset=PoseConversionPreset.G9_TO_G8_FEMALE,
+    )
+
+    with ZipFile(result.package.zip_path) as archive:
+        support = archive.read(
+            "Content/Runtime/Support/DAZ_3D_112833_FN_Titan_Mk_Action_Pose_for_Genesis_8_Female.dsx"
+        ).decode("utf-8")
+
+    assert '<Artist VALUE="FenixPhoenix"/>' in support
+    assert '<Artist VALUE="Daz Originals"/>' in support
+
+
 def _require_road_trip_samples() -> None:
     if not ROAD_TRIP_ZIP.exists() or not ROAD_TRIP_G9_PATH.exists():
         pytest.skip("Road Trip pose converter calibration samples are local-only")
@@ -229,6 +403,30 @@ def _load_road_trip_g8_pose() -> dict:
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
     return json.loads(raw.decode("utf-8"))
+
+
+def write_file(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+def write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _synthetic_pose(asset_id: str) -> dict:
+    return {
+        "file_version": "0.6.1.0",
+        "asset_info": {"id": asset_id, "type": "preset_pose"},
+        "scene": {
+            "animations": [
+                {"url": "name://@selection:?translation/x/value", "keys": [[0, 1]]},
+                {"url": "name://@selection/hip:?translation/y/value", "keys": [[0, 2]]},
+                {"url": "name://@selection/l_index1:?rotation/x/value", "keys": [[0, 3]]},
+            ]
+        },
+    }
 
 
 def _meaningful_animation_map(pose: dict) -> dict[tuple[str, str, str], float]:

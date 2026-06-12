@@ -13,8 +13,9 @@ from forge.analyzer.inference import infer_metadata
 from forge.analyzer.inventory import classify_inventory
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
+from forge.analyzer.support import SupportMetadata, SupportParseError, parse_support_metadata
 from forge.packager.dim import DimPackageResult, build_dim_package
-from forge.pose_converter.converter import convert_g8f_pose_to_g9
+from forge.pose_converter.converter import PoseConversionPreset, convert_pose
 from forge.pose_converter.duf import loads_duf, save_duf
 
 
@@ -51,19 +52,29 @@ class _SourceFile:
     data: bytes
 
 
+@dataclass(frozen=True)
+class _ConversionTarget:
+    source_file: _SourceFile
+    output_content_path: str
+    preset: PoseConversionPreset
+    suffix: str = ""
+
+
 def build_converted_pose_dim_package(
     source: Path,
     output_dir: Path,
     *,
     metadata: dict | None = None,
+    preset: PoseConversionPreset = PoseConversionPreset.G8_TO_G9,
 ) -> ConvertedPoseDimPackageResult:
     source = Path(source)
     output_dir = Path(output_dir)
     converted_folder = _converted_staging_folder(source, output_dir)
     _reset_converted_folder(converted_folder, output_dir)
 
-    conversion_report = convert_pose_product(source, converted_folder)
+    conversion_report = convert_pose_product(source, converted_folder, preset=preset)
     package_metadata = dict(metadata or {})
+    source_metadata = _source_support_metadata(source)
     if not package_metadata.get("product_image"):
         copied_support_image = _copy_source_support_image(source, converted_folder)
         if copied_support_image:
@@ -72,7 +83,7 @@ def build_converted_pose_dim_package(
     inventory = classify_inventory(scan)
     inference = infer_metadata(scan, inventory)
     contract = contract_to_dict(build_review_contract(scan, inventory, inference))
-    contract["product"].update(_package_metadata(source, conversion_report, package_metadata))
+    contract["product"].update(_package_metadata(source, conversion_report, package_metadata, source_metadata))
     package = build_dim_package(scan, contract, output_dir)
 
     return ConvertedPoseDimPackageResult(
@@ -82,7 +93,12 @@ def build_converted_pose_dim_package(
     )
 
 
-def convert_pose_product(source: Path, output_dir: Path) -> PoseProductReport:
+def convert_pose_product(
+    source: Path,
+    output_dir: Path,
+    *,
+    preset: PoseConversionPreset = PoseConversionPreset.G8_TO_G9,
+) -> PoseProductReport:
     source = Path(source)
     output_dir = Path(output_dir)
     source_files = _read_source_files(source)
@@ -92,9 +108,8 @@ def convert_pose_product(source: Path, output_dir: Path) -> PoseProductReport:
     skipped_files: list[str] = []
     copied_images: list[str] = []
 
-    for source_file in sorted(source_files, key=lambda item: item.content_path.lower()):
-        if not _is_g8f_pose_path(source_file.content_path):
-            continue
+    for target in _conversion_targets(source_files, preset):
+        source_file = target.source_file
 
         try:
             pose = loads_duf(source_file.data)
@@ -102,8 +117,8 @@ def convert_pose_product(source: Path, output_dir: Path) -> PoseProductReport:
             skipped_files.append(source_file.content_path)
             continue
 
-        result = convert_g8f_pose_to_g9(pose)
-        output_content_path = _to_g9_content_path(source_file.content_path)
+        result = convert_pose(pose, target.preset)
+        output_content_path = target.output_content_path
         _set_asset_id(result.pose, output_content_path)
         output_file = output_dir / "Content" / Path(output_content_path)
         save_duf(result.pose, output_file, compressed=True)
@@ -140,6 +155,66 @@ def convert_pose_product(source: Path, output_dir: Path) -> PoseProductReport:
     return report
 
 
+def _conversion_targets(
+    source_files: list[_SourceFile],
+    preset: PoseConversionPreset,
+) -> list[_ConversionTarget]:
+    targets: list[_ConversionTarget] = []
+    for source_file in sorted(source_files, key=lambda item: item.content_path.lower()):
+        targets.extend(_targets_for_source(source_file, preset))
+    if preset != PoseConversionPreset.G8_TO_G9:
+        return targets
+
+    grouped: dict[str, list[_ConversionTarget]] = {}
+    for target in targets:
+        grouped.setdefault(target.output_content_path.lower(), []).append(target)
+    resolved: list[_ConversionTarget] = []
+    for target in targets:
+        collisions = grouped[target.output_content_path.lower()]
+        if len(collisions) <= 1:
+            resolved.append(target)
+            continue
+        resolved.append(
+            _ConversionTarget(
+                source_file=target.source_file,
+                output_content_path=_suffix_pose_path(target.output_content_path, target.suffix),
+                preset=target.preset,
+                suffix=target.suffix,
+            )
+        )
+    return resolved
+
+
+def _targets_for_source(source_file: _SourceFile, preset: PoseConversionPreset) -> tuple[_ConversionTarget, ...]:
+    path = source_file.content_path
+    if preset == PoseConversionPreset.G8_TO_G9:
+        g8_variant = _g8_pose_variant(path)
+        if not g8_variant:
+            return ()
+        return (
+            _ConversionTarget(
+                source_file=source_file,
+                output_content_path=_to_g9_content_path(path),
+                preset=PoseConversionPreset.G8_TO_G9,
+                suffix=f"_{g8_variant}",
+            ),
+        )
+    if not _is_g9_pose_path(path):
+        return ()
+    if preset == PoseConversionPreset.G9_TO_G8_BOTH:
+        return (
+            _ConversionTarget(source_file, _to_g8_content_path(path, "Female"), PoseConversionPreset.G9_TO_G8_FEMALE),
+            _ConversionTarget(source_file, _to_g8_content_path(path, "Male"), PoseConversionPreset.G9_TO_G8_MALE),
+        )
+    return (
+        _ConversionTarget(
+            source_file=source_file,
+            output_content_path=_to_g8_content_path(path, _g8_target_variant(preset)),
+            preset=preset,
+        ),
+    )
+
+
 def _read_source_files(source: Path) -> list[_SourceFile]:
     if source.is_file() and is_zipfile(source):
         return _read_zip_source(source)
@@ -165,6 +240,20 @@ def _copy_source_support_image(source: Path, converted_folder: Path) -> str:
         output_path.write_bytes(image.data)
         return image.content_path
     return ""
+
+
+def _source_support_metadata(source: Path) -> SupportMetadata | None:
+    for source_file in sorted(_read_source_files(source), key=lambda item: item.content_path.lower()):
+        path = PurePosixPath(source_file.content_path)
+        if len(path.parts) < 3 or path.parts[0].lower() != "runtime" or path.parts[1].lower() != "support":
+            continue
+        if path.suffix.lower() != ".dsx":
+            continue
+        try:
+            return parse_support_metadata(source_file.data)
+        except SupportParseError:
+            continue
+    return None
 
 
 def _matching_support_image(
@@ -197,9 +286,12 @@ def _package_metadata(
     source: Path,
     report: PoseProductReport,
     metadata: dict,
+    source_metadata: SupportMetadata | None = None,
 ) -> dict:
     product_name = str(metadata.get("product_name") or _converted_product_name(source, report))
     artists = _metadata_list(metadata.get("artists"))
+    if not artists and source_metadata is not None:
+        artists = list(source_metadata.artists)
     primary_artist = str(metadata.get("primary_artist") or (artists[0] if artists else ""))
     store_display_name = str(metadata.get("store_display_name") or "")
     store_id = str(metadata.get("store_id") or store_display_name)
@@ -246,6 +338,23 @@ def _metadata_list(value) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _g8_pose_variant(path: str) -> str:
+    lowered = path.lower()
+    if not lowered.endswith(".duf"):
+        return ""
+    normalized = f"/{lowered}"
+    if "/people/genesis 8 female/poses/" in normalized:
+        return "F"
+    if "/people/genesis 8 male/poses/" in normalized:
+        return "M"
+    return ""
+
+
+def _is_g9_pose_path(path: str) -> bool:
+    lowered = path.lower()
+    return lowered.endswith(".duf") and "/people/genesis 9/poses/" in f"/{lowered}"
+
+
 def _read_zip_source(source: Path) -> list[_SourceFile]:
     files = []
     with ZipFile(source) as archive:
@@ -273,24 +382,55 @@ def _content_path(path: str) -> str:
 
 
 def _is_g8f_pose_path(path: str) -> bool:
-    lowered = path.lower()
-    return (
-        lowered.endswith(".duf")
-        and "/people/genesis 8 female/poses/" in f"/{lowered}"
-    )
+    return _g8_pose_variant(path) == "F"
 
 
 def _to_g9_content_path(path: str) -> str:
     replacements = (
         ("Genesis 8 Female", "Genesis 9"),
+        ("Genesis 8 Male", "Genesis 9"),
         ("Genesis%208%20Female", "Genesis%209"),
+        ("Genesis%208%20Male", "Genesis%209"),
         ("G8F", "G9"),
+        ("G8M", "G9"),
         ("G8 F", "G9"),
+        ("G8 M", "G9"),
     )
     converted = path
     for old, new in replacements:
         converted = converted.replace(old, new)
     return converted
+
+
+def _to_g8_content_path(path: str, variant: str) -> str:
+    target_names = {
+        "Female": ("Genesis 8 Female", "Genesis%208%20Female", "G8F"),
+        "Male": ("Genesis 8 Male", "Genesis%208%20Male", "G8M"),
+        "Merged": ("Genesis 8", "Genesis%208", "G8"),
+    }
+    target_name, target_encoded, target_short = target_names[variant]
+    converted = path
+    replacements = (
+        ("Genesis 9", target_name),
+        ("Genesis%209", target_encoded),
+        ("G9", target_short),
+    )
+    for old, new in replacements:
+        converted = converted.replace(old, new)
+    return converted
+
+
+def _g8_target_variant(preset: PoseConversionPreset) -> str:
+    if preset == PoseConversionPreset.G9_TO_G8_MALE:
+        return "Male"
+    if preset == PoseConversionPreset.G9_TO_G8_MERGED:
+        return "Merged"
+    return "Female"
+
+
+def _suffix_pose_path(path: str, suffix: str) -> str:
+    pose_path = PurePosixPath(path)
+    return pose_path.with_name(f"{pose_path.stem}{suffix}{pose_path.suffix}").as_posix()
 
 
 def _set_asset_id(pose: dict, output_content_path: str) -> None:

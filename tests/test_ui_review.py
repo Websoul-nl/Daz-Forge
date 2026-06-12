@@ -16,7 +16,8 @@ from forge.analyzer.inventory import classify_inventory
 from forge.analyzer.model_provider import OllamaProvider
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
 from forge.analyzer.source import scan_source
-from forge.product_tokens import SourceProductIdentity, record_product_token_build
+from forge.pose_converter.converter import PoseConversionPreset
+from forge.product_tokens import SourceProductIdentity, record_product_token_build, source_identity_from_path
 from forge.ui.main_window import AnalysisWorker, MainWindow
 from forge.ui.main_window import analyze_source
 from forge.ui.main_window import _apply_model_suggestion_diffs, _model_diff_label, _model_suggestion_diffs
@@ -172,6 +173,36 @@ def test_main_window_adds_pose_converter_tab(qapp) -> None:
     assert window.pose_convert_button.objectName() == "primaryPoseConvertButton"
 
 
+def test_pose_converter_page_has_conversion_preset_dropdown(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+
+    assert [window.pose_preset_combo.itemText(index) for index in range(window.pose_preset_combo.count())] == [
+        "Genesis 8 -> Genesis 9",
+        "Genesis 9 -> Genesis 8 Female",
+        "Genesis 9 -> Genesis 8 Male",
+        "Genesis 9 -> Genesis 8 Female + Male",
+        "Genesis 9 -> Genesis 8 Merged",
+    ]
+    assert window.pose_preset_combo.currentText() == "Genesis 8 -> Genesis 9"
+    assert _has_ancestor(window.pose_preset_combo, window.pose_converter_page)
+
+
+def test_pose_converter_page_does_not_show_artist_field(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+
+    assert not _has_ancestor(window.pose_artists_edit, window.pose_converter_page)
+    assert "Artists" not in _widget_texts(window.pose_converter_page)
+
+
+def test_main_window_styles_regular_dropdowns_like_inputs(qapp) -> None:
+    window = MainWindow(available_model_providers=())
+    style = window.styleSheet()
+
+    assert "QLineEdit, QTextEdit, QComboBox {" in style
+    assert "QComboBox::drop-down" in style
+    assert "QComboBox QAbstractItemView" in style
+
+
 def test_main_window_has_top_right_settings_button(qapp) -> None:
     window = MainWindow(available_model_providers=())
 
@@ -284,16 +315,18 @@ def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -
     source.write_bytes(b"zip-ish")
     output = tmp_path / "out"
 
-    def fake_builder(source_path, output_path, *, metadata):
+    def fake_builder(source_path, output_path, *, metadata, preset=PoseConversionPreset.G8_TO_G9):
         calls["source"] = source_path
         calls["output"] = output_path
         calls["metadata"] = metadata
+        calls["preset"] = preset
         return SimpleNamespace(
             conversion_report=SimpleNamespace(converted_count=24, skipped_count=0),
             package=SimpleNamespace(zip_path=output_path / "RND90000001-01_RoadTripPosesforGenesis9.zip"),
         )
 
     window = MainWindow(available_model_providers=(), pose_package_builder=fake_builder)
+    window.pose_preset_combo.setCurrentText("Genesis 9 -> Genesis 8 Female")
     window.set_pose_source_path(source)
     window.pose_output_edit.setText(str(output))
     window.pose_product_name_edit.setText("Road Trip Poses for Genesis 9")
@@ -303,19 +336,18 @@ def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -
     window.pose_token_edit.setText("90000001")
     stale_guid = "11111111-2222-4333-8444-555555555555"
     window.pose_guid_edit.setText(stale_guid)
-    window.pose_artists_edit.setText("Websoul")
-
     window.build_pose_converter_package()
 
     assert calls["source"] == source
     assert calls["output"] == output
+    assert calls["preset"] == PoseConversionPreset.G9_TO_G8_FEMALE
     assert calls["metadata"]["product_name"] == "Road Trip Poses for Genesis 9"
     assert calls["metadata"]["store_id"] == "Renderosity"
     assert calls["metadata"]["store_prefix"] == "RND"
     assert calls["metadata"]["product_token"] == "90000001"
     assert calls["metadata"]["global_id"] != stale_guid
     assert calls["metadata"]["global_id"] == window.pose_guid_edit.text()
-    assert calls["metadata"]["artists"] == ["Websoul"]
+    assert "artists" not in calls["metadata"]
     assert "Converted 24 pose file(s)" in window.pose_status_text.toPlainText()
     assert "RND90000001-01_RoadTripPosesforGenesis9.zip" in window.pose_status_text.toPlainText()
 
@@ -344,6 +376,165 @@ def test_pose_converter_prefills_readable_product_name_from_support_file(qapp, t
     window.set_pose_source_path(source)
 
     assert window.pose_product_name_edit.text() == "Road Trip Poses for Genesis 9"
+
+
+def test_pose_converter_reuses_source_token_for_selected_store(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "IM00112833-01_FNTitanMkActionPoseforGenesis9.zip"
+    _write_zip(
+        source,
+        {
+            "Content/Runtime/Support/DAZ_3D_112833_FN_Titan.dsx": b'''<?xml version="1.0" encoding="utf-8"?>
+<ContentDBInstall VERSION="1.0">
+  <Products>
+    <Product VALUE="FN Titan Mk Action Pose for Genesis 9">
+      <StoreID VALUE="DAZ 3D"/>
+      <ProductToken VALUE="112833"/>
+    </Product>
+  </Products>
+</ContentDBInstall>''',
+            "Content/People/Genesis 9/Poses/FN Titan/Pose.duf": b"{}",
+        },
+    )
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        token_registry_path=tmp_path / "tokens.json",
+    )
+
+    window.set_pose_source_path(source)
+    window.pose_store_combo.setCurrentText("LOCAL USER")
+
+    assert window.pose_token_edit.text() == "112833"
+
+
+def test_pose_converter_generates_separate_tokens_for_presets_without_source_token(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "Loose Poses"
+    source.mkdir()
+    write_file(source / "People" / "Genesis 9" / "Poses" / "Loose" / "Pose.duf", "{}")
+    registry_path = tmp_path / "tokens.json"
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=tmp_path / "settings.json",
+        token_registry_path=registry_path,
+    )
+
+    window.set_pose_source_path(source)
+    window.pose_preset_combo.setCurrentText("Genesis 9 -> Genesis 8 Female")
+    female_token = window.pose_token_edit.text()
+    record_product_token_build(
+        registry_path,
+        source_identity=source_identity_from_path(source),
+        workflow_label="Genesis 9 -> Genesis 8 Female",
+        output_store_id="LOCAL USER",
+        generated_product_name=window.pose_product_name_edit.text(),
+        assigned_token=female_token,
+        token_source="generated",
+    )
+    window.app_settings = AppSettings(next_product_number=90000001)
+
+    window.pose_preset_combo.setCurrentText("Genesis 9 -> Genesis 8 Male")
+
+    assert female_token == "90000000"
+    assert window.pose_token_edit.text() == "90000001"
+
+
+def test_pose_converter_reuses_registry_token_for_custom_store(qapp, tmp_path: Path) -> None:
+    source = tmp_path / "Loose Custom Store Poses"
+    source.mkdir()
+    write_file(source / "People" / "Genesis 8 Female" / "Poses" / "Loose" / "Pose.duf", "{}")
+    registry_path = tmp_path / "tokens.json"
+    record_product_token_build(
+        registry_path,
+        source_identity=source_identity_from_path(source),
+        workflow_label="Genesis 8 -> Genesis 9",
+        output_store_id="CUSTOM STORE",
+        generated_product_name="Loose Custom Store Poses",
+        assigned_token="90000042",
+        token_source="generated",
+    )
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=tmp_path / "settings.json",
+        token_registry_path=registry_path,
+    )
+
+    window.set_pose_source_path(source)
+
+    assert window.pose_token_edit.text() == "90000000"
+
+    window.pose_store_combo.setCurrentText("CUSTOM STORE")
+
+    assert window.pose_token_edit.text() == "90000042"
+
+
+def test_pose_converter_does_not_advance_generated_token_when_registry_recording_fails(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "Registry Failure Poses"
+    source.mkdir()
+    write_file(source / "People" / "Genesis 8 Female" / "Poses" / "Loose" / "Pose.duf", "{}")
+    settings_path = tmp_path / "settings.json"
+    output = tmp_path / "out"
+
+    def fail_record(*args, **kwargs):
+        raise OSError("registry write failed")
+
+    def fake_builder(source_path, output_path, *, metadata, preset=PoseConversionPreset.G8_TO_G9):
+        return SimpleNamespace(
+            conversion_report=SimpleNamespace(converted_count=1, skipped_count=0),
+            package=SimpleNamespace(zip_path=output_path / "LU90000000-01_RegistryFailurePoses.zip"),
+        )
+
+    monkeypatch.setattr("forge.ui.main_window.record_product_token_build", fail_record)
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=settings_path,
+        store_catalog_path=tmp_path / "stores.json",
+        token_registry_path=tmp_path / "tokens.json",
+        pose_package_builder=fake_builder,
+    )
+
+    window.set_pose_source_path(source)
+    window.pose_output_edit.setText(str(output))
+    window.build_pose_converter_package()
+
+    assert "Package built, but registry update failed: registry write failed" in window.pose_status_text.toPlainText()
+    assert window.pose_token_edit.text() == "90000000"
+    assert window.app_settings.next_product_number == 90000000
+    assert not settings_path.exists()
+
+
+def test_pose_converter_manual_token_does_not_block_new_source_token(qapp, tmp_path: Path) -> None:
+    first_source = tmp_path / "Manual Token Poses"
+    first_source.mkdir()
+    write_file(first_source / "People" / "Genesis 8 Female" / "Poses" / "Loose" / "Pose.duf", "{}")
+    second_source = tmp_path / "IM00112833-01_FNTitanMkActionPoseforGenesis9.zip"
+    _write_zip(
+        second_source,
+        {
+            "Content/Runtime/Support/DAZ_3D_112833_FN_Titan.dsx": b'''<?xml version="1.0" encoding="utf-8"?>
+<ContentDBInstall VERSION="1.0">
+  <Products>
+    <Product VALUE="FN Titan Mk Action Pose for Genesis 9">
+      <StoreID VALUE="DAZ 3D"/>
+      <ProductToken VALUE="112833"/>
+    </Product>
+  </Products>
+</ContentDBInstall>''',
+            "Content/People/Genesis 9/Poses/FN Titan/Pose.duf": b"{}",
+        },
+    )
+    window = MainWindow(
+        app_settings=AppSettings(next_product_number=90000000),
+        settings_path=tmp_path / "settings.json",
+        token_registry_path=tmp_path / "tokens.json",
+    )
+
+    window.set_pose_source_path(first_source)
+    window.pose_token_edit.setText("12345678")
+
+    window.set_pose_source_path(second_source)
+
+    assert window.pose_token_edit.text() == "112833"
 
 
 def test_dim_packager_reuses_source_token_and_logs_build(qapp, tmp_path: Path) -> None:
@@ -630,6 +821,7 @@ def test_dim_packager_retry_syncs_visible_generated_token_after_registry_recordi
     assert window.current_contract["product"]["product_token"] == "90000001"
     assert window.token_edit.text() == "90000001"
 
+
 def _has_ancestor(widget: QWidget, ancestor: QWidget) -> bool:
     current: QWidget | None = widget
     while current is not None:
@@ -637,6 +829,15 @@ def _has_ancestor(widget: QWidget, ancestor: QWidget) -> bool:
             return True
         current = current.parentWidget()
     return False
+
+
+def _widget_texts(widget: QWidget) -> set[str]:
+    texts = set()
+    for child in widget.findChildren(QWidget):
+        text_method = getattr(child, "text", None)
+        if callable(text_method):
+            texts.add(str(text_method()))
+    return texts
 
 
 def test_table_model_exposes_review_rows_and_headers(tmp_path: Path) -> None:

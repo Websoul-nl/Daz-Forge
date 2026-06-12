@@ -122,6 +122,78 @@ G8F_TO_G9_RULES: tuple[MappingRule, ...] = (
 )
 
 
-RULES_BY_SOURCE: dict[ChannelRef, tuple[MappingRule, ...]] = {}
-for mapping_rule in G8F_TO_G9_RULES:
-    RULES_BY_SOURCE[mapping_rule.source] = RULES_BY_SOURCE.get(mapping_rule.source, ()) + (mapping_rule,)
+G9_TO_G8_RULES: tuple[MappingRule, ...] = (
+    direct_bone("", "")
+    + direct_bone("hip", "hip")
+    + direct_bone("pelvis", "pelvis")
+    + direct_bone("spine1", "abdomenLower")
+    + direct_bone("spine2", "abdomenUpper")
+    + direct_bone("neck1", "neckLower")
+    + direct_bone("neck2", "neckUpper")
+    + direct_bone("head", "head")
+    + direct_bone("l_shoulder", "lCollar")
+    + direct_bone("r_shoulder", "rCollar")
+    + direct_bone("l_upperarm", "lShldrBend")
+    + direct_bone("r_upperarm", "rShldrBend")
+    + direct_bone("l_forearm", "lForearmBend")
+    + direct_bone("r_forearm", "rForearmBend")
+    + direct_bone("l_hand", "lHand")
+    + direct_bone("r_hand", "rHand")
+    + direct_bone("l_shin", "lShin")
+    + direct_bone("r_shin", "rShin")
+    + direct_bone("l_foot", "lFoot")
+    + direct_bone("r_foot", "rFoot")
+    + direct_bone("l_toes", "lToe")
+    + direct_bone("r_toes", "rToe")
+    + direct_bone("l_thumb1", "lThumb1")
+    + direct_bone("l_thumb2", "lThumb2")
+    + direct_bone("l_thumb3", "lThumb3")
+    + direct_bone("r_thumb1", "rThumb1")
+    + direct_bone("r_thumb2", "rThumb2")
+    + direct_bone("r_thumb3", "rThumb3")
+    + direct_bone("l_index1", "lIndex1")
+    + direct_bone("l_index2", "lIndex2")
+    + direct_bone("l_index3", "lIndex3")
+    + direct_bone("r_index1", "rIndex1")
+    + direct_bone("r_index2", "rIndex2")
+    + direct_bone("r_index3", "rIndex3")
+    + direct_bone("l_mid1", "lMid1")
+    + direct_bone("l_mid2", "lMid2")
+    + direct_bone("l_mid3", "lMid3")
+    + direct_bone("r_mid1", "rMid1")
+    + direct_bone("r_mid2", "rMid2")
+    + direct_bone("r_mid3", "rMid3")
+    + direct_bone("l_ring1", "lRing1")
+    + direct_bone("l_ring2", "lRing2")
+    + direct_bone("l_ring3", "lRing3")
+    + direct_bone("r_ring1", "rRing1")
+    + direct_bone("r_ring2", "rRing2")
+    + direct_bone("r_ring3", "rRing3")
+    + direct_bone("l_pinky1", "lPinky1")
+    + direct_bone("l_pinky2", "lPinky2")
+    + direct_bone("l_pinky3", "lPinky3")
+    + direct_bone("r_pinky1", "rPinky1")
+    + direct_bone("r_pinky2", "rPinky2")
+    + direct_bone("r_pinky3", "rPinky3")
+    + (
+        rule("l_thigh", "rotation", "x", "lThighBend"),
+        rule("l_thigh", "rotation", "y", "lThighBend"),
+        rule("l_thigh", "rotation", "z", "lThighBend", offset=-6.0),
+        rule("r_thigh", "rotation", "x", "rThighBend"),
+        rule("r_thigh", "rotation", "y", "rThighBend"),
+        rule("r_thigh", "rotation", "z", "rThighBend", offset=6.0),
+        rule("l_metatarsal", "rotation", "z", "lMetatarsals"),
+        rule("r_metatarsal", "rotation", "z", "rMetatarsals"),
+    )
+)
+
+
+def rules_by_source(rules: tuple[MappingRule, ...]) -> dict[ChannelRef, tuple[MappingRule, ...]]:
+    grouped: dict[ChannelRef, tuple[MappingRule, ...]] = {}
+    for mapping_rule in rules:
+        grouped[mapping_rule.source] = grouped.get(mapping_rule.source, ()) + (mapping_rule,)
+    return grouped
+
+
+RULES_BY_SOURCE: dict[ChannelRef, tuple[MappingRule, ...]] = rules_by_source(G8F_TO_G9_RULES)
+G9_TO_G8_RULES_BY_SOURCE: dict[ChannelRef, tuple[MappingRule, ...]] = rules_by_source(G9_TO_G8_RULES)

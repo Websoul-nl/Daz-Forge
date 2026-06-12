@@ -47,6 +47,7 @@ from forge.analyzer.review_contract import build_review_contract, contract_to_di
 from forge.analyzer.source import SourceScan, read_source_file, scan_source
 from forge.analyzer.support import SupportParseError, parse_support_metadata
 from forge.packager.dim import build_dim_package
+from forge.pose_converter.converter import PoseConversionPreset
 from forge.pose_converter.product import build_converted_pose_dim_package
 from forge.product_tokens import (
     ProductTokenRegistryError,
@@ -318,8 +319,10 @@ class MainWindow(QMainWindow):
         self.settings_button.setObjectName("settingsButton")
         self.settings_button.setToolTip("Settings")
         self.settings_button.setFixedWidth(42)
+        self.pose_preset_combo = QComboBox()
+        self.pose_preset_combo.addItems([preset.label for preset in PoseConversionPreset])
         self.pose_source_edit = QLineEdit()
-        self.pose_source_edit.setPlaceholderText("Select a Genesis 8 Female pose product zip or folder")
+        self.pose_source_edit.setPlaceholderText("Select a Genesis 8 or Genesis 9 pose product zip or folder")
         self.pose_browse_source_button = QPushButton("Browse")
         self.pose_output_edit = QLineEdit()
         self.pose_output_edit.setPlaceholderText("Output folder")
@@ -337,6 +340,10 @@ class MainWindow(QMainWindow):
         self.pose_store_code_edit.setPlaceholderText("Code")
         self.pose_token_edit = QLineEdit(str(self.app_settings.next_product_number))
         self.pose_token_edit.setPlaceholderText("Token")
+        self._pose_token_last_auto = str(self.app_settings.next_product_number)
+        self._pose_token_context: tuple[str, ...] | None = None
+        self._pose_token_source = "generated"
+        self._pose_token_is_new_generated = False
         self.pose_guid_edit = QLineEdit(str(uuid4()))
         self.pose_guid_edit.setPlaceholderText("GUID")
         self.pose_generate_guid_button = QPushButton("Generate")
@@ -498,6 +505,7 @@ class MainWindow(QMainWindow):
         self.pose_open_output_button.clicked.connect(self.open_pose_output_folder)
         self.pose_convert_button.clicked.connect(self.build_pose_converter_package)
         self.pose_source_edit.returnPressed.connect(self._pose_source_entered)
+        self.pose_preset_combo.currentTextChanged.connect(self._pose_preset_changed)
         self.pose_store_combo.currentTextChanged.connect(self._pose_store_changed)
         self.pose_generate_guid_button.clicked.connect(self.generate_pose_guid)
         self.settings_button.clicked.connect(self.open_settings)
@@ -539,6 +547,10 @@ class MainWindow(QMainWindow):
             self.pose_store_code_edit.setText(self.app_settings.default_store.default_code)
         if self.pose_token_edit.text().strip() in ("", str(previous_settings.next_product_number)):
             self.pose_token_edit.setText(str(self.app_settings.next_product_number))
+            self._pose_token_last_auto = str(self.app_settings.next_product_number)
+            self._pose_token_context = None
+            self._pose_token_source = "generated"
+            self._pose_token_is_new_generated = False
 
     def set_pose_source_path(self, path: Path) -> None:
         source = Path(path)
@@ -546,7 +558,14 @@ class MainWindow(QMainWindow):
         if not self.pose_output_edit.text().strip():
             self.pose_output_edit.setText(str(self._package_output_folder(source)))
         if not self.pose_product_name_edit.text().strip():
-            self.pose_product_name_edit.setText(_converted_pose_product_name(source))
+            self.pose_product_name_edit.setText(_converted_pose_product_name(source, self._selected_pose_preset()))
+        self._refresh_pose_token_assignment()
+
+    def _pose_preset_changed(self, _preset_label: str) -> None:
+        source_text = self.pose_source_edit.text().strip()
+        if source_text and not self.pose_product_name_edit.text().strip():
+            self.pose_product_name_edit.setText(_converted_pose_product_name(Path(source_text), self._selected_pose_preset()))
+        self._refresh_pose_token_assignment()
 
     def _pose_source_entered(self) -> None:
         source_text = self.pose_source_edit.text().strip()
@@ -578,11 +597,25 @@ class MainWindow(QMainWindow):
         source = Path(source_text)
         output = Path(self.pose_output_edit.text().strip()) if self.pose_output_edit.text().strip() else self._package_output_folder(source)
         self.pose_output_edit.setText(str(output))
+        self._refresh_pose_token_assignment()
+        try:
+            collisions = self._pose_token_collisions(source)
+        except (OSError, ProductTokenRegistryError) as exc:
+            self._set_pose_status(str(exc))
+            return
+        if collisions:
+            self._set_pose_status("\n".join(collisions))
+            return
         try:
             self.generate_pose_guid()
             self._save_pose_store_to_catalog()
             self._set_pose_status("Converting pose product...")
-            result = self.pose_package_builder(source, output, metadata=self._pose_package_metadata())
+            result = self.pose_package_builder(
+                source,
+                output,
+                metadata=self._pose_package_metadata(),
+                preset=self._selected_pose_preset(),
+            )
         except Exception as exc:
             self._set_pose_status(f"Pose conversion failed: {exc}")
             self._analysis_progress(f"Pose conversion failed: {exc}")
@@ -590,6 +623,14 @@ class MainWindow(QMainWindow):
         converted = getattr(result.conversion_report, "converted_count", 0)
         skipped = getattr(result.conversion_report, "skipped_count", 0)
         zip_path = getattr(result.package, "zip_path", "")
+        token_source = self._pose_token_source_for_build(source)
+        try:
+            self._record_pose_token_build(source, token_source=token_source)
+        except (OSError, ProductTokenRegistryError) as exc:
+            self._set_pose_status(f"Package built, but registry update failed: {exc}")
+            self._analysis_progress(f"Pose package built, but registry update failed: {exc}")
+            return
+        self._advance_pose_generated_token_if_current(token_source)
         self._set_pose_status(
             f"Converted {converted} pose file(s).\n"
             f"Skipped {skipped} file(s).\n"
@@ -613,16 +654,15 @@ class MainWindow(QMainWindow):
 
     def _pose_store_changed(self, store_name: str) -> None:
         store = self._matching_store(store_name)
-        if store is None:
-            return
-        self.pose_store_prefix_edit.setText(store.dim_prefix)
-        if not self.pose_store_code_edit.text().strip():
-            self.pose_store_code_edit.setText(store.default_code)
+        if store is not None:
+            self.pose_store_prefix_edit.setText(store.dim_prefix)
+            if not self.pose_store_code_edit.text().strip():
+                self.pose_store_code_edit.setText(store.default_code)
+        self._refresh_pose_token_assignment()
 
     def _pose_package_metadata(self) -> dict[str, Any]:
         store_name = self.pose_store_combo.currentText().strip()
         matching_store = self._matching_store(store_name)
-        artists = _split_product_artists(self.pose_artists_edit.text())
         return {
             "product_name": self.pose_product_name_edit.text().strip(),
             "store_display_name": store_name,
@@ -631,9 +671,141 @@ class MainWindow(QMainWindow):
             "store_code": self.pose_store_code_edit.text().strip(),
             "product_token": self.pose_token_edit.text().strip(),
             "global_id": self.pose_guid_edit.text().strip(),
-            "artists": artists,
-            "primary_artist": artists[0] if artists else "",
         }
+
+    def _selected_pose_preset(self) -> PoseConversionPreset:
+        return PoseConversionPreset.from_label(self.pose_preset_combo.currentText())
+
+    def _pose_workflow_label(self) -> str:
+        return self._selected_pose_preset().label
+
+    def _refresh_pose_token_assignment(self) -> None:
+        source_text = self.pose_source_edit.text().strip()
+        if not source_text:
+            return
+        source = Path(source_text)
+        source_identity = source_identity_from_path(source)
+        metadata = self._pose_package_metadata()
+        context = self._pose_token_assignment_context(
+            source=source,
+            source_identity=source_identity,
+            output_store_id=str(metadata.get("store_id") or ""),
+        )
+        if self._has_manual_pose_token(context):
+            return
+        if source_identity.source_product_token:
+            self._set_pose_auto_token(
+                source_identity.source_product_token,
+                token_source="source",
+                is_new_generated=False,
+                context=context,
+            )
+            return
+        try:
+            assignment = resolve_product_token(
+                self.token_registry_path,
+                source_identity=source_identity,
+                workflow_label=self._pose_workflow_label(),
+                output_store_id=str(metadata.get("store_id") or ""),
+                generated_product_name=self.pose_product_name_edit.text().strip(),
+                next_product_number=self.app_settings.next_product_number,
+            )
+        except (OSError, ProductTokenRegistryError) as exc:
+            self._set_pose_status(str(exc))
+            return
+        self._set_pose_auto_token(
+            assignment.token,
+            token_source=assignment.token_source,
+            is_new_generated=assignment.is_new_generated,
+            context=context,
+        )
+
+    def _pose_token_assignment_context(
+        self,
+        *,
+        source: Path,
+        source_identity,
+        output_store_id: str,
+    ) -> tuple[str, ...]:
+        return (
+            str(source),
+            source_identity.source_key,
+            source_identity.source_store_id,
+            source_identity.source_product_token,
+            source_identity.source_product_name,
+            self._pose_workflow_label(),
+            output_store_id,
+        )
+
+    def _set_pose_auto_token(
+        self,
+        token: str,
+        *,
+        token_source: str,
+        is_new_generated: bool,
+        context: tuple[str, ...],
+    ) -> None:
+        self.pose_token_edit.setText(token)
+        self._pose_token_last_auto = token
+        self._pose_token_context = context
+        self._pose_token_source = token_source
+        self._pose_token_is_new_generated = is_new_generated
+
+    def _has_manual_pose_token(self, context: tuple[str, ...] | None = None) -> bool:
+        current = self.pose_token_edit.text().strip()
+        has_manual_token = bool(self._pose_token_last_auto and current and current != self._pose_token_last_auto)
+        if context is None or not has_manual_token:
+            return has_manual_token
+        return context == self._pose_token_context
+
+    def _pose_token_collisions(self, source: Path) -> tuple[str, ...]:
+        token = self.pose_token_edit.text().strip()
+        if not token:
+            return ()
+        metadata = self._pose_package_metadata()
+        collisions = load_product_token_registry(self.token_registry_path).collisions_for(
+            output_store_id=str(metadata.get("store_id") or ""),
+            assigned_token=token,
+            source_identity=source_identity_from_path(source),
+            workflow_label=self._pose_workflow_label(),
+        )
+        return tuple(
+            f"Product token already used in {collision.output_store_id} by {collision.product_name}"
+            for collision in collisions
+        )
+
+    def _pose_token_source_for_build(self, source: Path) -> str:
+        source_identity = source_identity_from_path(source)
+        token = self.pose_token_edit.text().strip()
+        if source_identity.source_product_token and token == source_identity.source_product_token:
+            return "source"
+        if self._has_manual_pose_token():
+            return "manual"
+        if self._pose_token_source == "generated":
+            return "generated"
+        if self._pose_token_source == "manual":
+            return "manual"
+        return "manual"
+
+    def _record_pose_token_build(self, source: Path, *, token_source: str) -> None:
+        record_product_token_build(
+            self.token_registry_path,
+            source_identity=source_identity_from_path(source),
+            workflow_label=self._pose_workflow_label(),
+            output_store_id=str(self._pose_package_metadata().get("store_id") or ""),
+            generated_product_name=self.pose_product_name_edit.text().strip(),
+            assigned_token=self.pose_token_edit.text().strip(),
+            token_source=token_source,
+        )
+
+    def _advance_pose_generated_token_if_current(self, token_source: str) -> None:
+        if (
+            self._pose_token_is_new_generated
+            and token_source == "generated"
+            and self.pose_token_edit.text().strip() == str(self.app_settings.next_product_number)
+        ):
+            self._save_next_product_number(self.app_settings.next_product_number + 1)
+            self._pose_token_is_new_generated = False
 
     def generate_pose_guid(self) -> None:
         self.pose_guid_edit.setText(str(uuid4()))
@@ -710,7 +882,6 @@ class MainWindow(QMainWindow):
             self._set_issue_lines([f"Package build failed: {exc}"])
             self._analysis_progress(f"Package build failed: {exc}")
             return
-        self._analysis_progress(f"Package built: {result.zip_path}")
         token_source = self._product_token_source_for_build(source_identity)
         try:
             record_product_token_build(
@@ -729,6 +900,7 @@ class MainWindow(QMainWindow):
             return
         self._advance_generated_product_token_if_current(product, token_source, assigned_token)
         self._clear_product_token_warnings("product-token-collision", "product-token-registry")
+        self._analysis_progress(f"Package built: {result.zip_path}")
 
     def open_output_folder(self) -> None:
         source_text = self.source_edit.text().strip()
@@ -1005,9 +1177,9 @@ class MainWindow(QMainWindow):
             product["artists"] = artists
         if artists and not primary_artist:
             product["primary_artist"] = artists[0]
+        self._refresh_product_token_assignment()
 
     def _populate_product_fields(self) -> None:
-        self._refresh_product_token_assignment()
         product = self.current_contract.get("product", {})
         self._syncing_product_fields = True
         try:
@@ -1031,9 +1203,9 @@ class MainWindow(QMainWindow):
             if not self.store_code_edit.text().strip():
                 self.store_code_edit.setText(store.default_code)
         self._product_metadata_changed()
+        self._refresh_product_token_assignment(update_control=True)
 
     def _product_metadata_changed(self) -> None:
-        self._refresh_product_token_assignment(update_control=True)
         if self._syncing_product_fields:
             return
         product = self.current_contract.setdefault("product", {})
@@ -1046,17 +1218,15 @@ class MainWindow(QMainWindow):
         product["store_prefix"] = self.store_prefix_edit.text().strip()
         product["store_code"] = self.store_code_edit.text().strip()
         product["product_token"] = self.token_edit.text().strip()
-        product["global_id"] = self.guid_edit.text().strip()
-        product["product_image"] = self.product_image_path_edit.text().strip()
         if self._has_manual_product_token():
             product["product_token_source"] = "manual"
             product["product_token_is_new_generated"] = False
+        product["global_id"] = self.guid_edit.text().strip()
+        product["product_image"] = self.product_image_path_edit.text().strip()
         product["artists"] = artists
         product["primary_artist"] = artists[0] if artists else ""
         self.summary_label.setText(self.summary_text())
 
-    def _set_product_image_text(self, value: str) -> None:
-        self.product_image_path_edit.setText(value)
     def _refresh_product_token_assignment(self, update_control: bool = False) -> None:
         product = self.current_contract.setdefault("product", {})
         source_path = str(product.get("source_path") or self.source_edit.text().strip())
@@ -1146,6 +1316,8 @@ class MainWindow(QMainWindow):
         self.app_settings = replace(self.app_settings, next_product_number=value)
         save_settings(self.settings_path, self.app_settings)
 
+    def _set_product_image_text(self, value: str) -> None:
+        self.product_image_path_edit.setText(value)
         drop_zone = getattr(self, "product_image_drop_zone", None)
         if drop_zone is not None:
             drop_zone.set_image_path(self._resolved_product_image_path(value))
@@ -1275,12 +1447,36 @@ class MainWindow(QMainWindow):
                 color: #e8eaed;
                 font-size: 12px;
             }
-            QLineEdit, QTextEdit {
+            QLineEdit, QTextEdit, QComboBox {
                 background: #2b2c30;
                 border: 1px solid #46484f;
                 border-radius: 6px;
                 padding: 8px 10px;
                 selection-background-color: #16c4a0;
+            }
+            QComboBox {
+                padding-right: 28px;
+            }
+            QComboBox::drop-down {
+                background: #30343a;
+                border-left: 1px solid #46484f;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+                width: 26px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #c9cdd4;
+                margin-right: 8px;
+            }
+            QComboBox QAbstractItemView {
+                background: #2b2c30;
+                border: 1px solid #46484f;
+                color: #e8eaed;
+                selection-background-color: #16c4a0;
+                selection-color: #101214;
             }
             QLineEdit[tableEditor="true"], QComboBox[tableEditor="true"] {
                 background: #2b2c30;
@@ -1618,13 +1814,13 @@ def _split_product_artists(value: str) -> list[str]:
     return [part.strip() for part in normalized.split(";") if part.strip()]
 
 
-def _converted_pose_product_name(source: Path) -> str:
+def _converted_pose_product_name(source: Path, preset: PoseConversionPreset = PoseConversionPreset.G8_TO_G9) -> str:
     support_name = _support_product_name_from_source(source)
     if support_name:
-        return _convert_pose_product_name_to_g9(support_name)
+        return _convert_pose_product_name_for_preset(support_name, preset)
     name = source.stem
     name = re.sub(r"^[A-Z]{0,6}\d{8}-\d{2}_", "", name)
-    return _convert_pose_product_name_to_g9(name) or "Converted Pose Product"
+    return _convert_pose_product_name_for_preset(name, preset) or "Converted Pose Product"
 
 
 def _support_product_name_from_source(source: Path) -> str:
@@ -1646,14 +1842,29 @@ def _support_product_name_from_source(source: Path) -> str:
 
 
 def _convert_pose_product_name_to_g9(name: str) -> str:
-    replacements = (
-        ("Genesis8Female", "Genesis9"),
-        ("Genesis 8 Female", "Genesis 9"),
-        ("G8F", "G9"),
-    )
+    return _convert_pose_product_name_for_preset(name, PoseConversionPreset.G8_TO_G9)
+
+
+def _convert_pose_product_name_for_preset(name: str, preset: PoseConversionPreset) -> str:
+    if preset == PoseConversionPreset.G8_TO_G9:
+        replacements = (
+            ("Genesis8Female", "Genesis9"),
+            ("Genesis8Male", "Genesis9"),
+            ("Genesis 8 Female", "Genesis 9"),
+            ("Genesis 8 Male", "Genesis 9"),
+            ("G8F", "G9"),
+            ("G8M", "G9"),
+        )
+    elif preset == PoseConversionPreset.G9_TO_G8_MALE:
+        replacements = (("Genesis9", "Genesis8Male"), ("Genesis 9", "Genesis 8 Male"), ("G9", "G8M"))
+    elif preset == PoseConversionPreset.G9_TO_G8_MERGED:
+        replacements = (("Genesis9", "Genesis8"), ("Genesis 9", "Genesis 8"), ("G9", "G8"))
+    else:
+        replacements = (("Genesis9", "Genesis8Female"), ("Genesis 9", "Genesis 8 Female"), ("G9", "G8F"))
+    converted = name
     for old, new in replacements:
-        name = name.replace(old, new)
-    return name
+        converted = converted.replace(old, new)
+    return converted
 
 
 def _default_store_catalog_path() -> Path:

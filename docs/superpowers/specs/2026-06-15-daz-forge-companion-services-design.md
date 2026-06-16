@@ -1,7 +1,19 @@
 # Daz Forge Companion Services Design
 
 Date: 2026-06-15
-Status: Approved direction, pending implementation plan
+Status: Superseded on 2026-06-16
+Superseded by: `2026-06-16-vera-lab-service-api-design.md`
+
+## Supersession Note
+
+This design captured an earlier option where Daz-specific services would move
+into the Daz Forge repository as companion services. Robert revised the
+ownership decision on 2026-06-16: Vera's Lab should remain a separate service
+shelf for now, while becoming portable and API-driven enough for Daz Forge,
+Wayfinder, and future AI skills to consume it.
+
+Keep this document as historical thinking. Do not use it as the implementation
+plan.
 
 ## Purpose
 

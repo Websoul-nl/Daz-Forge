@@ -169,6 +169,8 @@ def _infer_categories(content_path: str, content_type: str) -> tuple[str, ...]:
         return ("/Default/Utilities/Scripts",)
     if "materials" in parts or content_type == "Preset/Materials":
         return ("/Default/Materials",)
+    if content_type in {"Prop", "Set"} and ("props" in parts or "probs" in parts):
+        return ("/Default/Props",)
     if "poses" in parts or content_type == "Preset/Pose":
         return ("/Default/Poses",)
     if "shaping" in parts or content_type == "Preset/Morph":
@@ -217,6 +219,7 @@ def _metadata_family(value: str) -> str:
 
 
 def _infer_compatibilities(content_path: str) -> tuple[str, ...]:
+    path_lower = content_path.lower()
     compact = re.sub(r"[^a-z0-9]+", "", content_path.lower())
     if "g3f" in compact or "genesis3female" in compact:
         return ("/Genesis 3/Female",)
@@ -226,6 +229,8 @@ def _infer_compatibilities(content_path: str) -> tuple[str, ...]:
         return ("/Genesis 8/Female", "/Genesis 8.1/Female")
     if "g8m" in compact or "genesis8male" in compact:
         return ("/Genesis 8/Male", "/Genesis 8.1/Male")
+    if "genesis8" in compact or re.search(r"(^|[^a-z0-9])g8([^a-z0-9]|$)", path_lower):
+        return ("/Genesis 8/Female", "/Genesis 8/Male")
     if "g9" in compact or "genesis9" in compact:
         return ("/Genesis 9/Base",)
     return ()

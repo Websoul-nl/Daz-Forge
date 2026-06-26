@@ -307,6 +307,7 @@ def test_prop_wearables_keep_prop_category_and_follower_support_agrees(tmp_path:
 def test_generation_tokens_infer_compatibilities(tmp_path: Path) -> None:
     write_file(tmp_path / "Props" / "Musical" / "Pan flute" / "Pan flute G8F Left Hand.duf", dson("wearable"))
     write_file(tmp_path / "Props" / "Musical" / "Pan flute" / "Poses" / "G9" / "G9 Sitting.duf", dson("preset_pose"))
+    write_file(tmp_path / "People" / "Genesis 8" / "Poses" / "Lexana" / "Bad Boys" / "01 BB.duf", dson("preset_pose"))
 
     result = analyze(tmp_path)
     by_path = {asset.path: asset for asset in result.assets}
@@ -316,6 +317,23 @@ def test_generation_tokens_infer_compatibilities(tmp_path: Path) -> None:
         "/Genesis 8.1/Female",
     )
     assert by_path["Props/Musical/Pan flute/Poses/G9/G9 Sitting.duf"].compatibilities == ("/Genesis 9/Base",)
+    assert by_path["People/Genesis 8/Poses/Lexana/Bad Boys/01 BB.duf"].compatibilities == (
+        "/Genesis 8/Female",
+        "/Genesis 8/Male",
+    )
+
+
+def test_prop_helpers_under_pose_folder_keep_prop_category(tmp_path: Path) -> None:
+    write_file(
+        tmp_path / "People" / "Genesis 8" / "Poses" / "Lexana" / "Bad Boys" / "Probs" / "Chair.duf",
+        dson("scene_subset"),
+    )
+
+    result = analyze(tmp_path)
+
+    asset = result.assets[0]
+    assert asset.content_type == "Set"
+    assert asset.categories == ("/Default/Props",)
 
 
 def test_scene_subset_under_props_infers_prop_and_agrees_with_prop_support(tmp_path: Path) -> None:

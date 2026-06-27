@@ -35,6 +35,12 @@
       "dim_prefix": "DA",
       "display_name": "DeviantArt",
       "store_id": "DeviantArt"
+    },
+    {
+      "default_code": "",
+      "dim_prefix": "WS",
+      "display_name": "Websoul",
+      "store_id": "Websoul"
     }
   ]
 }

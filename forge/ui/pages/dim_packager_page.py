@@ -4,6 +4,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QFrame,
     QGridLayout,
     QHeaderView,
     QHBoxLayout,
@@ -29,8 +30,11 @@ class DimPackagerPage(QWidget):
         self.detail_layout: QVBoxLayout
         self.footer_layout: QVBoxLayout
         self.package_action_bar: QHBoxLayout
+        self.product_ai_label: QLabel
+        self.product_ai_separator: QFrame
         self.product_tab: QWidget
         self.product_image_tab: QWidget
+        self.selected_file_actions_label: QLabel
         self.selected_file_tab: QWidget
         self.gathered_files_tab: QWidget
         self.gathered_file_table: QTableWidget
@@ -120,19 +124,22 @@ class DimPackagerPage(QWidget):
         layout.addWidget(controller.generate_guid_button, 4, 3)
         layout.addWidget(QLabel("Artists"), 5, 0)
         layout.addWidget(controller.artists_edit, 5, 1, 1, 3)
-        layout.addWidget(QLabel("Model"), 6, 0)
+        self.product_ai_separator = QFrame()
+        self.product_ai_separator.setFrameShape(QFrame.Shape.HLine)
+        self.product_ai_separator.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(self.product_ai_separator, 6, 0, 1, 4)
+        self.product_ai_label = QLabel("Product-wide AI Review")
+        self.product_ai_label.setObjectName("sectionLabel")
+        layout.addWidget(self.product_ai_label, 7, 0, 1, 4)
+        layout.addWidget(QLabel("Model"), 8, 0)
         model_bar = QHBoxLayout()
         model_bar.addWidget(controller.provider_combo)
         model_bar.addWidget(controller.model_name_edit, 1)
         model_bar.addWidget(controller.ask_model_button)
-        layout.addLayout(model_bar, 6, 1, 1, 3)
-        support_bar = QHBoxLayout()
-        support_bar.addWidget(controller.use_support_button)
-        support_bar.addStretch(1)
-        layout.addLayout(support_bar, 7, 1, 1, 3)
+        layout.addLayout(model_bar, 8, 1, 1, 3)
         layout.setColumnStretch(1, 1)
         layout.setColumnStretch(3, 1)
-        layout.setRowStretch(8, 1)
+        layout.setRowStretch(9, 1)
         return tab
 
     def _build_product_image_tab(self) -> QWidget:
@@ -159,7 +166,11 @@ class DimPackagerPage(QWidget):
         self.detail_layout = QVBoxLayout(tab)
         self.detail_layout.setContentsMargins(12, 12, 12, 12)
         self.detail_layout.setSpacing(8)
+        self.selected_file_actions_label = QLabel("Selected File Actions")
+        self.selected_file_actions_label.setObjectName("sectionLabel")
+        self.detail_layout.addWidget(self.selected_file_actions_label)
         row_action_bar = QHBoxLayout()
+        row_action_bar.addWidget(controller.use_support_button)
         row_action_bar.addWidget(controller.mark_row_reviewed_button)
         row_action_bar.addStretch(1)
         self.detail_layout.addLayout(row_action_bar)

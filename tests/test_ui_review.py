@@ -304,11 +304,15 @@ def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> No
     assert _has_ancestor(window.provider_combo, page.product_tab)
     assert _has_ancestor(window.model_name_edit, page.product_tab)
     assert _has_ancestor(window.ask_model_button, page.product_tab)
-    assert _has_ancestor(window.use_support_button, page.product_tab)
+    assert page.product_ai_label.text() == "Product-wide AI Review"
+    assert _has_ancestor(page.product_ai_label, page.product_tab)
     assert _has_ancestor(window.product_image_path_edit, page.product_image_tab)
     assert _has_ancestor(window.product_image_drop_zone, page.product_image_tab)
     assert _has_ancestor(window.detail_view, page.selected_file_tab)
+    assert _has_ancestor(window.use_support_button, page.selected_file_tab)
     assert _has_ancestor(window.mark_row_reviewed_button, page.selected_file_tab)
+    assert page.selected_file_actions_label.text() == "Selected File Actions"
+    assert _has_ancestor(page.selected_file_actions_label, page.selected_file_tab)
     assert _has_ancestor(window.source_edit, page.source_toolbar)
     assert _has_ancestor(window.analyze_button, page.source_toolbar)
     assert page.footer_layout.itemAt(page.footer_layout.count() - 1).layout() is page.package_action_bar

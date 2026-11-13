@@ -6,13 +6,12 @@ included. Referenced base, third-party and unresolved files stay in the report.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import json
 import posixpath
 import re
 from typing import Iterable
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 
 from forge.analyzer.dson import DsonParseError, _decode_dson_bytes
 from forge.analyzer.source import (
@@ -45,20 +44,23 @@ def is_daz_base_file(content_path: str) -> bool:
     """Conservative built-in blacklist; installed base ownership is also checked."""
     normalized = content_path.replace("\\", "/").lstrip("/")
     lower = normalized.casefold()
-    # Morphs/UV Sets are extensibility points beneath the Genesis base folder.
-    # A vendor's morph or UV set is not itself Genesis base data.
+    # Genesis morphs/UV sets can be third-party additions, but resources
+    # specifically under DAZ 3D's own vendor namespace are protected.
     if BASE_DATA.search(normalized):
         if "/morphs/" in lower:
-            return bool(re.search(r"/morphs/daz 3d/(?:base/|genesis(?:[ /_-]|$))", lower))
+            return "/morphs/daz 3d/" in lower
         if "/uv sets/" in lower:
-            return bool(re.search(r"/uv sets/daz 3d/(?:base/|genesis(?:[ /_-]|$))", lower))
+            return "/uv sets/daz 3d/" in lower
         return True
     return bool(BASE_TEXTURES.search(normalized))
 
 
 def _normalized_path(raw: str, *, parent: str = "") -> str:
     """Convert DAZ URL paths to safe content-root-relative paths."""
-    value = unquote(raw.strip().replace("\\", "/")).split("#", 1)[0].split("?", 1)[0]
+    # Split the *encoded* URL first. %23 and %3F can be literal filename
+    # characters and must not be mistaken for fragment/query delimiters.
+    encoded = raw.strip().replace("\\", "/").split("#", 1)[0].split("?", 1)[0]
+    value = unquote(encoded)
     if not value or value.startswith(("//", "http:", "https:", "file:")):
         return ""
     if re.match(r"^[a-zA-Z]:", value) or "\x00" in value:
@@ -80,7 +82,7 @@ def _references(data: bytes, content_path: str) -> tuple[str, ...]:
     """Walk DSON JSON strings, including gzip/ZIP-compressed DAZ assets."""
     try:
         document = json.loads(_decode_dson_bytes(data))
-    except (DsonParseError, ValueError, OSError, EOFError, ImportError) as exc:
+    except (DsonParseError, ValueError, OSError, EOFError, ImportError, RecursionError) as exc:
         raise ValueError(f"Cannot inspect DSON {content_path}: {exc}") from exc
     result: set[str] = set()
 
@@ -96,7 +98,10 @@ def _references(data: bytes, content_path: str) -> tuple[str, ...]:
             if normalized and PurePosixPath(normalized).suffix.lower() in REFERENCE_EXTENSIONS:
                 result.add(normalized)
 
-    visit(document)
+    try:
+        visit(document)
+    except RecursionError as exc:
+        raise ValueError(f"DSON reference tree is too deeply nested: {content_path}") from exc
     result.discard(content_path)
     return tuple(sorted(result, key=str.lower))
 
@@ -243,15 +248,17 @@ def gather_dsx(dsx: Path, extra_libraries: Iterable[Path] = ()) -> SourceScan:
                 warnings.append(f"Unresolved dependency: {content_path} (from {via})")
             continue
 
+        # Another product's ownership claim beats mere references, even if
+        # the selected DSX also happens to list that shared dependency.
+        if owners is None:
+            owners = _other_product_owners(roots, selected)
+        if key in owners:
+            records[key] = GatheredFile(
+                content_path, "external", f"Owned by installed product: {owners[key]}",
+                str(location),
+            )
+            continue
         if not explicitly_owned:
-            if owners is None:
-                owners = _other_product_owners(roots, selected)
-            if key in owners:
-                records[key] = GatheredFile(
-                    content_path, "external", f"Owned by installed product: {owners[key]}",
-                    str(location),
-                )
-                continue
             if not _product_related(content_path, prefixes):
                 records[key] = GatheredFile(
                     content_path, "unknown",
@@ -261,11 +268,12 @@ def gather_dsx(dsx: Path, extra_libraries: Iterable[Path] = ()) -> SourceScan:
                 continue
 
         source_file = SourceFile(str(location), content_path)
+        details = location.stat()
         found[key] = source_file
         records[key] = GatheredFile(
             content_path, "included",
             "Declared by DSX" if explicitly_owned else f"Same product namespace; from {via}",
-            str(location),
+            str(location), details.st_size, details.st_mtime_ns,
         )
         if not explicitly_owned:
             warnings.append(f"Inferred product dependency: {content_path} (from {via})")

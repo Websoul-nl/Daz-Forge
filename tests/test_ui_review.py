@@ -1350,7 +1350,7 @@ def test_main_window_can_ask_configured_model_provider(qapp, tmp_path: Path) -> 
         requested["model_name"] = model_name
         return StaticProvider()
 
-    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True)
+    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True, available_model_providers=("ollama",))
     window._show_model_suggestions = lambda contract: captured.setdefault("contract", contract)
     window.set_source_path(tmp_path)
     window.analyze_current_source()

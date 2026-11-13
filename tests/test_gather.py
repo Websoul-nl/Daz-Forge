@@ -5,7 +5,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from forge.analyzer.gather import is_daz_base_file
+from forge.analyzer.gather import _normalized_path, is_daz_base_file
 from forge.analyzer.source import SourceScanError, scan_source
 from forge.analyzer.support import parse_support_metadata
 from forge.packager.dim import build_dim_package
@@ -155,3 +155,50 @@ def test_cross_library_declared_dependency(tmp_path: Path) -> None:
     write(other_root / TEXTURE, b"second library")
     scan = scan_source(dsx, extra_libraries=(other_root,))
     assert TEXTURE in {entry.content_path for entry in scan.files}
+
+
+
+def test_declared_shared_file_is_owned_by_other_product(tmp_path: Path) -> None:
+    _root, dsx = product(tmp_path)
+    dsx.write_text(dsx_xml([SUIT, FOREIGN], [MORPH, TEXTURE]), encoding="utf-8")
+    scan = scan_source(dsx)
+    statuses = {entry.content_path: entry.status for entry in scan.gathered_files}
+
+    assert statuses[FOREIGN] == "external"
+    assert FOREIGN not in {entry.content_path for entry in scan.files}
+
+
+def test_base_morphs_and_uv_sets_are_protected_but_vendor_assets_are_allowed() -> None:
+    assert is_daz_base_file(
+        "data/DAZ 3D/Genesis 8/Female/Morphs/DAZ 3D/Expressions/Blink.dsf"
+    )
+    assert is_daz_base_file(
+        "data/DAZ 3D/Genesis 9/Base/UV Sets/DAZ 3D/DefaultUV.dsf"
+    )
+    assert not is_daz_base_file(
+        "data/DAZ 3D/Genesis 8/Female/Morphs/Artist/Sporty/Fix.dsf"
+    )
+
+
+def test_dependency_url_decode_preserves_encoded_filename_characters() -> None:
+    assert _normalized_path(
+        "/Runtime/Textures/Artist/Sporty/Tex%23One%3FTwo.jpg#image"
+    ) == "Runtime/Textures/Artist/Sporty/Tex#One?Two.jpg"
+    assert _normalized_path("/../../Runtime/Textures/Artist/Other.jpg") == ""
+    assert _normalized_path("C:/Windows/System32/evil.jpg") == ""
+
+
+def test_gather_tracks_file_modification_for_review_validation(tmp_path: Path) -> None:
+    root, dsx = product(tmp_path)
+    before = scan_source(dsx)
+    path = root / TEXTURE
+    original_mtime = path.stat().st_mtime_ns
+    import os
+    os.utime(path, ns=(original_mtime, original_mtime + 5_000_000_000))
+    after = scan_source(dsx)
+    original_record = next(entry for entry in before.gathered_files if entry.content_path == TEXTURE)
+    updated_record = next(entry for entry in after.gathered_files if entry.content_path == TEXTURE)
+
+    assert original_record.status == updated_record.status == "included"
+    assert original_record.size_bytes == updated_record.size_bytes
+    assert original_record.modified_ns != updated_record.modified_ns

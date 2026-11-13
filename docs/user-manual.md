@@ -6,7 +6,7 @@ Daz Forge is a Windows desktop tool for preparing DAZ Studio content packages.
 
 Current tools:
 
-- DIM Packager: scan a product folder or zip, review Smart Content metadata, and build a DIM-style zip.
+- DIM Packager: scan a product folder or ZIP, or gather a product from an installed Runtime/Support DSX, review Smart Content metadata, and build a DIM-style ZIP.
 - Pose Converters: convert Genesis 8 Female pose products into Genesis 9 pose products and package the result.
 - Optional model suggestions: ask a local LM Studio or Ollama model for metadata suggestions.
 
@@ -124,6 +124,44 @@ Generated packages include:
 - product content files
 
 Existing support files in the source are skipped and replaced with the newly generated support files.
+
+## Gathering an Installed Product from DSX
+
+Use this workflow when you only have a product's installed DAZ library and
+want a redistributable **personal backup**/DIM-style package of its own files.
+
+1. Open **DIM Packager** and drop a `Runtime/Support/*.dsx` file into the
+   window, paste its path, or use **Browse File**.
+2. The **Analyze** button changes to **Gather**. Click **Gather**.
+3. Daz Forge reads `Assets` and `SupportAssets` from the DSX, resolves
+   references in DSON DUF/DSF files (also gzip-compressed), and looks for
+   referenced product-specific textures, morphs, and thumbnails.
+4. Open the **Gathered Files** tab. Each path is classified:
+   - **included:** the DSX declares it, or it is referenced in the product's
+     own namespace without a conflicting other-product declaration;
+   - **base:** protected DAZ Genesis base assets (excluded even if the DSX
+     lists them);
+   - **external:** another installed product claims ownership (excluded);
+   - **unknown:** no reliable ownership evidence (excluded by default);
+   - **missing:** file referenced but absent. Missing explicitly declared
+     product files block packaging.
+5. Review **Warnings**, especially inferred ownership, unknown references
+   and script dependencies. Complete the usual Product and Selected File
+   review and click **Build Package**.
+
+The generated `.report.json` includes the gathered-file statuses and reasons
+for exclusions. The ZIP retains normal relative `Content/...` paths.
+
+**Important limitations:** Static dependency traversal cannot execute DAZ
+scripts or prove ownership from references alone. `SupportAssets` is often
+more complete than `Assets`, but even a valid DSX may be incomplete. A
+conservative built-in Genesis-base exclusion rule protects common base assets
+without excluding all vendor morphs under `data/DAZ 3D`. A clean-library
+installation test is still required; do not assume a warning-free gather means
+the product is independent of other DAZ products.
+
+The original product's ownership and redistribution rights are unchanged by
+creating a DIM ZIP. Do not redistribute copyrighted files without permission.
 
 ## Product Images
 

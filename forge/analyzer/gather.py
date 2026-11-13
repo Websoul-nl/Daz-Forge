@@ -157,7 +157,10 @@ def _product_prefixes(declared: set[str]) -> set[str]:
                     if segment in {"morphs", "uv sets"} and len(parts) > index + 2:
                         # Include only this vendor's subdirectory, not all
                         # Genesis morphs from other installed products.
-                        prefixes.add("/".join(lower[:index + 2]) + "/")
+                        # If a product directory exists after the author,
+                        # keep the inferred ownership within that product.
+                        depth = index + 3 if len(parts) > index + 3 else index + 2
+                        prefixes.add("/".join(lower[:depth]) + "/")
                         break
             else:
                 prefixes.add("/".join(lower[:3]) + "/")

@@ -314,6 +314,35 @@ def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> No
     assert page.footer_layout.itemAt(page.footer_layout.count() - 1).layout() is page.package_action_bar
 
 
+def test_dsx_source_shows_gather_and_populates_preview(qapp, tmp_path: Path) -> None:
+    preset = "Props/Websoul/Hero.duf"
+    write_file(tmp_path / preset, dson("scene_subset"))
+    dsx_path = tmp_path / "Runtime" / "Support" / "Hero.dsx"
+    write_file(
+        dsx_path,
+        """
+        <ContentDBInstall VERSION="1.0"><Products><Product VALUE="Hero">
+          <StoreID VALUE="LOCAL USER"/>
+          <ProductToken VALUE="323232"/>
+          <Assets><Asset VALUE="/Props/Websoul/Hero.duf"/></Assets>
+        </Product></Products></ContentDBInstall>
+        """,
+    )
+    window = MainWindow(available_model_providers=(), run_analysis_synchronously=True)
+    window.set_source_path(dsx_path)
+    assert window.gather_button.isHidden() is False
+    assert window.analyze_button.isHidden() is True
+    assert window.build_package_button.isEnabled() is False
+
+    window.gather_current_source()
+
+    assert window.current_contract["product"]["source_kind"] == "dsx"
+    assert window.current_contract["product"]["product_name"] == "Hero"
+    assert window.current_contract["gathered_files"]
+    assert window.dim_packager_page.gathered_file_table.rowCount() >= 2
+    assert window.build_package_button.isEnabled() is True
+
+
 def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -> None:
     calls = {}
     source = tmp_path / "IM00083577-01_RoadTripPosesforGenesis8Female.zip"

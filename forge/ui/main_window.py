@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 import re
 import shutil
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QTableView,
+    QTableWidgetItem,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -69,15 +70,19 @@ class AnalysisWorker(QObject):
     finished = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, source: Path, provider: MetadataSuggestionProvider | None = None) -> None:
+    def __init__(
+        self, source: Path, provider: MetadataSuggestionProvider | None = None,
+        extra_libraries: tuple[Path, ...] = (),
+    ) -> None:
         super().__init__()
         self.source = source
         self.provider = provider
+        self.extra_libraries = extra_libraries
 
     @Slot()
     def run(self) -> None:
         try:
-            context = _analyze_source_context(self.source, progress=self.progress.emit)
+            context = _analyze_source_context(self.source, progress=self.progress.emit, extra_libraries=self.extra_libraries)
             if self.provider is None:
                 self.finished.emit(_build_analysis_payload(context, progress=self.progress.emit))
                 return
@@ -277,9 +282,12 @@ class MainWindow(QMainWindow):
         )
 
         self.source_edit = QLineEdit()
-        self.source_edit.setPlaceholderText("Select a product folder or zip")
-        self.browse_button = QPushButton("Browse")
+        self.source_edit.setPlaceholderText("Select a product folder, ZIP or Runtime/Support DSX")
+        self.browse_button = QPushButton("Browse Folder")
+        self.browse_file_button = QPushButton("Browse File")
         self.analyze_button = QPushButton("Analyze")
+        self.gather_button = QPushButton("Gather")
+        self.gather_button.setVisible(False)
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter rows")
         self.warnings_only_checkbox = QCheckBox("Warnings only")
@@ -379,12 +387,45 @@ class MainWindow(QMainWindow):
 
         self._build_layout()
         self._connect_signals()
+        self._refresh_gather_controls()
         self._update_model_controls()
         self.statusBar().showMessage("Ready")
         self._apply_style()
 
     def set_source_path(self, path: Path) -> None:
         self.source_edit.setText(str(path))
+
+    def _analysis_library_roots(self) -> tuple[Path, ...]:
+        extra = self.app_settings.default_daz_library.strip()
+        return (Path(extra),) if extra and Path(extra).is_dir() else ()
+
+    def _refresh_gather_controls(self) -> None:
+        source_text = self.source_edit.text().strip()
+        is_dsx = Path(source_text).suffix.lower() == ".dsx"
+        self.gather_button.setVisible(is_dsx)
+        self.analyze_button.setVisible(not is_dsx)
+        gathered_source = self.current_contract.get("gather_source", "")
+        is_current = bool(source_text) and gathered_source == str(Path(source_text).resolve())
+        self.build_package_button.setEnabled(not self._analyzing and (not is_dsx or is_current))
+
+    def gather_current_source(self) -> None:
+        if self._analyzing:
+            return
+        source = Path(self.source_edit.text().strip())
+        if source.suffix.lower() != ".dsx":
+            self._set_issue_lines(["Select a product DSX file to gather."])
+            return
+        self._refresh_gather_controls()
+        if self.run_analysis_synchronously:
+            self._run_analysis_synchronously(source, None)
+        else:
+            self._start_analysis(source, None)
+
+    def _populate_gather_files(self) -> None:
+        entries = self.current_contract.get("gathered_files", [])
+        self.dim_packager_page.set_gathered_files(entries)
+        index = self.dim_packager_page.inspector_tabs.indexOf(self.dim_packager_page.gathered_files_tab)
+        self.dim_packager_page.inspector_tabs.setTabEnabled(index, bool(entries))
 
     def analyze_current_source(self) -> None:
         if self._analyzing:
@@ -394,6 +435,9 @@ class MainWindow(QMainWindow):
             self._set_issue_lines(["No source selected."])
             return
         source = Path(source_text)
+        if source.suffix.lower() == ".dsx":
+            self.gather_current_source()
+            return
         if self.run_analysis_synchronously:
             self._run_analysis_synchronously(source, None)
         else:
@@ -403,6 +447,8 @@ class MainWindow(QMainWindow):
         self.current_contract = contract
         self._ensure_product_metadata()
         self._populate_product_fields()
+        self._populate_gather_files()
+        self._refresh_gather_controls()
         self.reviewed_issue_messages = set()
         self.table_model.set_contract(self.current_contract)
         self.summary_label.setText(self.summary_text())
@@ -461,7 +507,8 @@ class MainWindow(QMainWindow):
         local_path = urls[0].toLocalFile()
         if local_path:
             self.set_source_path(Path(local_path))
-            self.analyze_current_source()
+            if Path(local_path).suffix.lower() != ".dsx":
+                self.analyze_current_source()
 
     def _build_layout(self) -> None:
         self.tabs = QTabWidget()
@@ -477,6 +524,9 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.browse_button.clicked.connect(self._browse_source)
+        self.browse_file_button.clicked.connect(self._browse_source_file)
+        self.gather_button.clicked.connect(self.gather_current_source)
+        self.source_edit.textChanged.connect(self._refresh_gather_controls)
         self.analyze_button.clicked.connect(self.analyze_current_source)
         self.source_edit.returnPressed.connect(self.analyze_current_source)
         for product_field in (
@@ -518,6 +568,16 @@ class MainWindow(QMainWindow):
         if folder:
             self.set_source_path(Path(folder))
             self.analyze_current_source()
+
+    def _browse_source_file(self) -> None:
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "Select Product ZIP or DSX", "",
+            "DAZ Product (*.dsx *.zip);;DSX Metadata (*.dsx);;ZIP Archive (*.zip)",
+        )
+        if file_name:
+            self.set_source_path(Path(file_name))
+            if not file_name.lower().endswith(".dsx"):
+                self.analyze_current_source()
 
     def create_settings_dialog(self) -> SettingsDialog:
         return SettingsDialog(self.app_settings, self.store_catalog, self)
@@ -833,6 +893,12 @@ class MainWindow(QMainWindow):
     def build_current_package(self) -> None:
         if self._analyzing:
             return
+        source_text_for_gather = self.source_edit.text().strip()
+        if Path(source_text_for_gather).suffix.lower() == ".dsx" and (
+            self.current_contract.get("gather_source") != str(Path(source_text_for_gather).resolve())
+        ):
+            self._set_issue_lines(["Click Gather and review the files before building a DSX package."])
+            return
         if self.current_contract.get("hard_blockers"):
             self._set_issue_lines(self._issue_lines() + ["Package build blocked: resolve hard blockers first."])
             return
@@ -874,7 +940,7 @@ class MainWindow(QMainWindow):
         try:
             self._save_current_store_to_catalog()
             result = build_dim_package(
-                scan_source(source),
+                scan_source(source, extra_libraries=self._analysis_library_roots()),
                 self.current_contract,
                 self._package_output_folder(source),
             )
@@ -1064,11 +1130,11 @@ class MainWindow(QMainWindow):
         self._set_analyzing(True)
         try:
             if provider is None:
-                contract = analyze_source(source, progress=self._analysis_progress)
+                contract = analyze_source(source, progress=self._analysis_progress, extra_libraries=self._analysis_library_roots())
             elif show_deterministic:
-                contract = analyze_source(source, provider=provider, progress=self._analysis_progress)
+                contract = analyze_source(source, provider=provider, progress=self._analysis_progress, extra_libraries=self._analysis_library_roots())
             else:
-                context = _analyze_source_context(source, progress=self._analysis_progress)
+                context = _analyze_source_context(source, progress=self._analysis_progress, extra_libraries=self._analysis_library_roots())
                 model_result = _request_model_result(provider, context, progress=self._analysis_progress)
                 contract = _build_analysis_payload(context, model_result, progress=self._analysis_progress)
         except Exception as exc:
@@ -1086,7 +1152,7 @@ class MainWindow(QMainWindow):
         self.summary_label.setText("Analyzing..." if provider is None else "Asking model...")
         self._set_issue_lines(["Analyzing source..." if provider is None else "Asking model..."])
         thread = QThread(self)
-        worker = AnalysisWorker(source, provider=provider)
+        worker = AnalysisWorker(source, provider=provider, extra_libraries=self._analysis_library_roots())
         worker.moveToThread(thread)
 
         thread.started.connect(worker.run)
@@ -1136,6 +1202,8 @@ class MainWindow(QMainWindow):
         self.analyze_button.setEnabled(not analyzing)
         self.provider_combo.setEnabled(not analyzing)
         self.build_package_button.setEnabled(not analyzing)
+        self.gather_button.setEnabled(not analyzing)
+        self.browse_file_button.setEnabled(not analyzing)
         self.go_to_output_folder_button.setEnabled(not analyzing)
         self.choose_product_image_button.setEnabled(not analyzing)
         self.pose_source_edit.setEnabled(not analyzing)
@@ -1145,6 +1213,7 @@ class MainWindow(QMainWindow):
         self.pose_open_output_button.setEnabled(not analyzing)
         self.pose_convert_button.setEnabled(not analyzing)
         self._update_model_controls()
+        self._refresh_gather_controls()
 
     def _after_warning_resolution(self) -> None:
         self.summary_label.setText(self.summary_text())
@@ -1332,8 +1401,8 @@ class MainWindow(QMainWindow):
         source_path = product.get("source_path") or self.source_edit.text().strip()
         if not source_path or product.get("source_kind") == "zip":
             return None
-        base = Path(str(source_path))
-        content_root = str(product.get("content_root") or "")
+        base = Path(str(product.get("content_root"))) if product.get("source_kind") == "dsx" else Path(str(source_path))
+        content_root = "" if product.get("source_kind") == "dsx" else str(product.get("content_root") or "")
         candidate = base / content_root / value if content_root else base / value
         return candidate
 
@@ -1578,8 +1647,9 @@ def analyze_source(
     source: Path,
     provider: MetadataSuggestionProvider | None = None,
     progress: Callable[[str], None] | None = None,
+    extra_libraries: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
-    context = _analyze_source_context(source, progress=progress)
+    context = _analyze_source_context(source, progress=progress, extra_libraries=extra_libraries)
     model_result = None
     if provider is not None:
         model_result = _request_model_result(provider, context, progress=progress)
@@ -1589,9 +1659,10 @@ def analyze_source(
 def _analyze_source_context(
     source: Path,
     progress: Callable[[str], None] | None = None,
+    extra_libraries: tuple[Path, ...] = (),
 ) -> AnalysisContext:
     _report_progress(progress, "Scanning source...")
-    scan = scan_source(source)
+    scan = scan_source(source, extra_libraries=extra_libraries)
     total_files = len(scan.files)
     _report_progress(progress, f"Scanned {total_files} files")
     _report_progress(progress, f"Classifying files... {total_files} / {total_files}")
@@ -1623,6 +1694,9 @@ def _build_analysis_payload(
     _report_progress(progress, "Building review grid...")
     contract = build_review_contract(context.scan, context.inventory, context.inference, model_result)
     payload = contract_to_dict(contract)
+    if context.scan.source_kind == "dsx":
+        payload["gather_source"] = str(Path(context.scan.source_path).resolve())
+        payload["gathered_files"] = [asdict(entry) for entry in context.scan.gathered_files]
     _report_progress(progress, _ready_status(payload))
     return payload
 

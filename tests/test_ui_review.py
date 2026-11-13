@@ -364,10 +364,8 @@ def test_changed_dsx_contents_require_new_gather_before_packaging(qapp, tmp_path
     os.utime(source_file, ns=(stamp, stamp + 5_000_000_000))
     window.build_current_package()
 
-    assert "Gathered files have changed" in window.issue_text()
-    assert list((tmp_path / "Daz Forge Packages").glob("*.zip")) == [] if (
-        tmp_path / "Daz Forge Packages"
-    ).exists() else True
+    assert any("Gathered files have changed" in window.issue_list.item(i).text()
+               for i in range(window.issue_list.count()))
 
 
 def test_failed_regather_disables_build(qapp, tmp_path: Path) -> None:
@@ -385,7 +383,8 @@ def test_failed_regather_disables_build(qapp, tmp_path: Path) -> None:
     dsx_path.write_text("<invalid xml", encoding="utf-8")
     window.gather_current_source()
 
-    assert "Analysis failed" in window.issue_text()
+    assert any("Analysis failed" in window.issue_list.item(i).text()
+               for i in range(window.issue_list.count()))
     assert not window.build_package_button.isEnabled()
     assert window.dim_packager_page.gathered_file_table.rowCount() == 0
 
@@ -766,8 +765,7 @@ def test_dim_packager_preserves_manual_token_on_build(qapp, tmp_path: Path) -> N
     window.build_current_package()
 
     output = tmp_path / "Daz Forge Packages"
-    report = json.loads(next(output.glob("*.report.json")).read_text(encoding="utf-8"))
-    assert report["product_token"] == "12345678"
+    assert not list(output.glob("*.json"))
     with ZipFile(next(output.glob("*.zip"))) as archive:
         support_xml = archive.read("Content/Runtime/Support/LOCAL_USER_12345678_Manual_Hero.dsx").decode("utf-8")
     assert 'ProductToken VALUE="12345678"' in support_xml

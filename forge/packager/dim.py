@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import json
 from pathlib import Path, PurePosixPath
 import re
+import shutil
+from contextlib import ExitStack
 import xml.etree.ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from forge.analyzer.source import SourceScan, read_source_file
+from forge.analyzer.source import SourceFile, SourceScan, read_source_file
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,13 @@ def build_dim_package(
     contract: dict,
     output_folder: Path,
 ) -> DimPackageResult:
+    if scan.hard_errors:
+        raise ValueError("Cannot package incomplete gathered source: " + "; ".join(scan.hard_errors))
+    if scan.source_kind == "dsx":
+        from forge.analyzer.gather import is_daz_base_file
+        forbidden = [item.content_path for item in scan.files if is_daz_base_file(item.content_path)]
+        if forbidden:
+            raise ValueError("DAZ base files are protected from DSX packaging: " + ", ".join(forbidden))
     product = contract.get("product", {})
     product_name = str(product.get("product_name") or Path(scan.source_path).stem)
     package_code = _package_code(product)
@@ -43,6 +52,7 @@ def build_dim_package(
     support_image_content_path = _support_image_path(support_content_path, str(product.get("product_image") or ""))
 
     file_payloads: dict[str, bytes] = {}
+    source_entries: dict[str, SourceFile] = {}
     skipped_support_files: list[str] = []
     support_asset_paths: list[str] = []
     for source_file in scan.files:
@@ -50,7 +60,7 @@ def build_dim_package(
         if _is_existing_support_file(content_path):
             skipped_support_files.append(content_path)
             continue
-        file_payloads[f"Content/{content_path}"] = read_source_file(scan, source_file)
+        source_entries[f"Content/{content_path}"] = source_file
         support_asset_paths.append(content_path)
 
     product_image_payload = _product_image_payload(scan, str(product.get("product_image") or ""))
@@ -60,15 +70,31 @@ def build_dim_package(
     support_xml = _support_xml(contract, support_content_path, tuple(sorted(set(support_asset_paths))))
     file_payloads[support_archive_path] = support_xml.encode("utf-8")
     file_payloads[support_script_archive_path] = _support_script(product).encode("utf-8")
-    installed_files = tuple(sorted(file_payloads))
+    installed_files = tuple(sorted(set(file_payloads) | set(source_entries)))
     manifest_xml = _manifest_xml(global_id, installed_files)
     supplement_xml = _supplement_xml(product_name)
 
-    with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
+    with ExitStack() as stack:
+        source_zip = stack.enter_context(ZipFile(scan.source_path)) if scan.source_kind == "zip" else None
+        archive = stack.enter_context(ZipFile(zip_path, "w", ZIP_DEFLATED))
         archive.writestr("Manifest.dsx", manifest_xml)
         archive.writestr("Supplement.dsx", supplement_xml)
         for archive_path in installed_files:
-            archive.writestr(archive_path, file_payloads[archive_path])
+            if archive_path in file_payloads:
+                archive.writestr(archive_path, file_payloads[archive_path])
+                continue
+            source_file = source_entries[archive_path]
+            with archive.open(archive_path, "w") as output:
+                if source_zip is not None:
+                    with source_zip.open(source_file.source_path) as input_file:
+                        shutil.copyfileobj(input_file, output)
+                else:
+                    location = (
+                        Path(source_file.source_path) if scan.source_kind == "dsx"
+                        else Path(scan.source_path) / source_file.source_path
+                    )
+                    with location.open("rb") as input_file:
+                        shutil.copyfileobj(input_file, output)
 
     report = {
         "zip_name": zip_path.name,
@@ -85,6 +111,9 @@ def build_dim_package(
         "installed_files": list(installed_files),
         "skipped_existing_support_files": skipped_support_files,
     }
+    if scan.source_kind == "dsx":
+        report["gathered_files"] = [asdict(item) for item in scan.gathered_files]
+        report["gather_warnings"] = list(scan.warnings)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     return DimPackageResult(

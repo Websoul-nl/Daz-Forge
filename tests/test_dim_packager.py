@@ -167,9 +167,10 @@ def test_atomic_build_preserves_existing_zip_on_source_read_failure(tmp_path: Pa
 
 
 def test_packager_rejects_duplicate_paths_even_if_invoked_directly(tmp_path: Path) -> None:
-    source = tmp_path / "Product"
-    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
-    write_file(source / "Props" / "hero.duf", dson("scene_subset"))
+    source = tmp_path / "Product.zip"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("Content/Props/Hero.duf", dson("scene_subset"))
+        archive.writestr("Content/Props/hero.duf", dson("scene_subset"))
     scan = scan_source(source)
 
     assert scan.duplicates

@@ -86,8 +86,6 @@ def scan_source(path: Path, extra_libraries: Iterable[Path] = ()) -> SourceScan:
     raise SourceScanError(f"Source must be a folder, zip or product DSX file: {source}")
 
 
-
-
 def read_source_file(scan: SourceScan, source_file: SourceFile) -> bytes:
     if scan.source_kind == "dsx":
         return Path(source_file.source_path).read_bytes()
@@ -97,6 +95,7 @@ def read_source_file(scan: SourceScan, source_file: SourceFile) -> bytes:
         with ZipFile(scan.source_path) as archive:
             return archive.read(source_file.source_path)
     raise SourceScanError(f"Unknown source kind: {scan.source_kind}")
+
 
 def _scan_folder(path: Path) -> SourceScan:
     resolved_root = path.resolve()
@@ -163,9 +162,12 @@ def _detect_content_root(names: list[str]) -> str:
     top_levels = {name.split("/", 1)[0] for name in names}
     if len(top_levels) == 1:
         wrapper = next(iter(top_levels))
-        wrapper_content = f"{wrapper}/Content"
-        if _has_daz_root_at_prefix(names, wrapper_content):
-            return wrapper_content
+        for name in names:
+            parts = name.split("/")
+            if len(parts) > 1 and parts[0] == wrapper and parts[1].casefold() == "content":
+                wrapper_content = f"{wrapper}/{parts[1]}"
+                if _has_daz_root_at_prefix(names, wrapper_content):
+                    return wrapper_content
         if _has_daz_root_at_prefix(names, wrapper):
             return wrapper
 
@@ -204,7 +206,7 @@ def _is_under_root(name: str, root: str) -> bool:
 def _find_duplicates(files: tuple[SourceFile, ...]) -> tuple[DuplicateContentPath, ...]:
     seen: dict[str, list[str]] = {}
     for file in files:
-        key = file.content_path.lower()
+        key = file.content_path.casefold()
         seen.setdefault(key, []).append(file.content_path)
 
     duplicates = [
@@ -227,10 +229,6 @@ def _validate_archive_member(name: str) -> str:
     if "\x00" in normalized or any(part in {"", ".", ".."} or ":" in part for part in parts):
         raise UnsafeArchivePathError(f"Archive member contains an unsafe path segment: {name}")
     return PurePosixPath(normalized).as_posix()
-
-
-def _looks_like_drive(part: str) -> bool:
-    return len(part) >= 2 and part[1] == ":" and part[0].isalpha()
 
 
 def _parts(value: str) -> tuple[str, ...]:

@@ -154,8 +154,8 @@ def test_atomic_build_preserves_existing_zip_on_source_read_failure(tmp_path: Pa
     scan = scan_source(source)
     contract = analyze_source(source)
     output = tmp_path / "out"
-    output.mkdir()
-    previous = output / "LU90000000-01_Product.zip"
+    original = build_dim_package(scan, contract, output)
+    previous = original.zip_path
     previous.write_bytes(b"previous valid package")
     asset.unlink()
 

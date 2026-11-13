@@ -150,9 +150,21 @@ def _product_prefixes(declared: set[str]) -> set[str]:
         parts = content_path.split("/")
         lower = [part.casefold() for part in parts]
         if lower[0] == "data" and len(parts) >= 4:
-            prefixes.add("/".join(lower[:3]) + "/")
+            if lower[1:3] == ["daz 3d", "genesis 8"] or (
+                lower[1] == "daz 3d" and lower[2].startswith("genesis ")
+            ):
+                for index, segment in enumerate(lower):
+                    if segment in {"morphs", "uv sets"} and len(parts) > index + 2:
+                        # Include only this vendor's subdirectory, not all
+                        # Genesis morphs from other installed products.
+                        prefixes.add("/".join(lower[:index + 2]) + "/")
+                        break
+            else:
+                prefixes.add("/".join(lower[:3]) + "/")
         elif lower[:2] == ["runtime", "textures"] and len(parts) >= 5:
             prefixes.add("/".join(lower[:4]) + "/")
+        elif lower[0] in {"people", "props", "environments", "figures"} and len(parts) >= 5:
+            prefixes.add("/".join(lower[:-1]) + "/")
     return prefixes
 
 

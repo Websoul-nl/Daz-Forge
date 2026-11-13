@@ -343,6 +343,53 @@ def test_dsx_source_shows_gather_and_populates_preview(qapp, tmp_path: Path) -> 
     assert window.build_package_button.isEnabled() is True
 
 
+
+def test_changed_dsx_contents_require_new_gather_before_packaging(qapp, tmp_path: Path) -> None:
+    import os
+
+    source_file = tmp_path / "Props" / "Websoul" / "Hero.duf"
+    write_file(source_file, dson("scene_subset"))
+    dsx_path = tmp_path / "Runtime" / "Support" / "Hero.dsx"
+    write_file(dsx_path, """
+    <ContentDBInstall><Products><Product VALUE="Hero">
+      <StoreID VALUE="LOCAL USER"/>
+      <Assets><Asset VALUE="/Props/Websoul/Hero.duf"/></Assets>
+    </Product></Products></ContentDBInstall>""")
+    window = MainWindow(available_model_providers=(), run_analysis_synchronously=True,
+                        token_registry_path=tmp_path / "tokens.json")
+    window.set_source_path(dsx_path)
+    window.gather_current_source()
+
+    stamp = source_file.stat().st_mtime_ns
+    os.utime(source_file, ns=(stamp, stamp + 5_000_000_000))
+    window.build_current_package()
+
+    assert "Gathered files have changed" in window.issue_text()
+    assert list((tmp_path / "Daz Forge Packages").glob("*.zip")) == [] if (
+        tmp_path / "Daz Forge Packages"
+    ).exists() else True
+
+
+def test_failed_regather_disables_build(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Websoul" / "Hero.duf", dson("scene_subset"))
+    dsx_path = tmp_path / "Runtime" / "Support" / "Hero.dsx"
+    write_file(dsx_path, """
+    <ContentDBInstall><Products><Product VALUE="Hero">
+      <Assets><Asset VALUE="/Props/Websoul/Hero.duf"/></Assets>
+    </Product></Products></ContentDBInstall>""")
+    window = MainWindow(available_model_providers=(), run_analysis_synchronously=True)
+    window.set_source_path(dsx_path)
+    window.gather_current_source()
+
+    assert window.build_package_button.isEnabled()
+    dsx_path.write_text("<invalid xml", encoding="utf-8")
+    window.gather_current_source()
+
+    assert "Analysis failed" in window.issue_text()
+    assert not window.build_package_button.isEnabled()
+    assert window.dim_packager_page.gathered_file_table.rowCount() == 0
+
+
 def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -> None:
     calls = {}
     source = tmp_path / "IM00083577-01_RoadTripPosesforGenesis8Female.zip"

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+import stat
+from typing import Iterable
 from zipfile import ZipFile
 
 
@@ -51,6 +53,16 @@ class DuplicateContentPath:
 
 
 @dataclass(frozen=True)
+class GatheredFile:
+    content_path: str
+    status: str
+    reason: str
+    source_path: str = ""
+    size_bytes: int = 0
+    modified_ns: int = 0
+
+
+@dataclass(frozen=True)
 class SourceScan:
     source_kind: str
     source_path: str
@@ -59,20 +71,24 @@ class SourceScan:
     duplicates: tuple[DuplicateContentPath, ...]
     warnings: tuple[str, ...] = ()
     hard_errors: tuple[str, ...] = ()
+    gathered_files: tuple[GatheredFile, ...] = ()
 
 
-def scan_source(path: Path) -> SourceScan:
+def scan_source(path: Path, extra_libraries: Iterable[Path] = ()) -> SourceScan:
     source = Path(path)
     if source.is_dir():
         return _scan_folder(source)
     if source.is_file() and source.suffix.lower() == ".zip":
         return _scan_zip(source)
-    raise SourceScanError(f"Source must be a folder or zip file: {source}")
-
-
+    if source.is_file() and source.suffix.lower() == ".dsx":
+        from forge.analyzer.gather import gather_dsx
+        return gather_dsx(source, extra_libraries)
+    raise SourceScanError(f"Source must be a folder, zip or product DSX file: {source}")
 
 
 def read_source_file(scan: SourceScan, source_file: SourceFile) -> bytes:
+    if scan.source_kind == "dsx":
+        return Path(source_file.source_path).read_bytes()
     if scan.source_kind == "folder":
         return (Path(scan.source_path) / source_file.source_path).read_bytes()
     if scan.source_kind == "zip":
@@ -80,12 +96,17 @@ def read_source_file(scan: SourceScan, source_file: SourceFile) -> bytes:
             return archive.read(source_file.source_path)
     raise SourceScanError(f"Unknown source kind: {scan.source_kind}")
 
+
 def _scan_folder(path: Path) -> SourceScan:
-    names = sorted(
-        _path_to_posix(file.relative_to(path))
-        for file in path.rglob("*")
-        if file.is_file()
-    )
+    resolved_root = path.resolve()
+    names = []
+    for file in path.rglob("*"):
+        if not file.is_file():
+            continue
+        if not file.resolve().is_relative_to(resolved_root):
+            raise SourceScanError(f"Source contains a file linked outside its root: {file}")
+        names.append(_path_to_posix(file.relative_to(path)))
+    names.sort()
     try:
         return _build_scan("folder", str(path), names)
     except SourceScanError:
@@ -98,11 +119,14 @@ def _scan_folder(path: Path) -> SourceScan:
 
 def _scan_zip(path: Path) -> SourceScan:
     with ZipFile(path) as archive:
-        names = sorted(
-            _validate_archive_member(info.filename)
-            for info in archive.infolist()
-            if not info.is_dir()
-        )
+        names = []
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise SourceScanError(f"Archive contains a symbolic-link entry: {info.filename}")
+            names.append(_validate_archive_member(info.filename))
+        names.sort()
     return _build_scan("zip", str(path), names)
 
 
@@ -127,8 +151,10 @@ def _detect_content_root(names: list[str]) -> str:
     if not names:
         raise SourceScanError("Source does not contain files.")
 
-    if _has_daz_root_at_prefix(names, "Content"):
-        return "Content"
+    for name in names:
+        top = name.split("/", 1)[0]
+        if top.casefold() == "content" and _has_daz_root_at_prefix(names, top):
+            return top
 
     if _has_daz_root_at_prefix(names, ""):
         return ""
@@ -136,9 +162,12 @@ def _detect_content_root(names: list[str]) -> str:
     top_levels = {name.split("/", 1)[0] for name in names}
     if len(top_levels) == 1:
         wrapper = next(iter(top_levels))
-        wrapper_content = f"{wrapper}/Content"
-        if _has_daz_root_at_prefix(names, wrapper_content):
-            return wrapper_content
+        for name in names:
+            parts = name.split("/")
+            if len(parts) > 1 and parts[0] == wrapper and parts[1].casefold() == "content":
+                wrapper_content = f"{wrapper}/{parts[1]}"
+                if _has_daz_root_at_prefix(names, wrapper_content):
+                    return wrapper_content
         if _has_daz_root_at_prefix(names, wrapper):
             return wrapper
 
@@ -177,7 +206,7 @@ def _is_under_root(name: str, root: str) -> bool:
 def _find_duplicates(files: tuple[SourceFile, ...]) -> tuple[DuplicateContentPath, ...]:
     seen: dict[str, list[str]] = {}
     for file in files:
-        key = file.content_path.lower()
+        key = file.content_path.casefold()
         seen.setdefault(key, []).append(file.content_path)
 
     duplicates = [
@@ -190,21 +219,16 @@ def _find_duplicates(files: tuple[SourceFile, ...]) -> tuple[DuplicateContentPat
 
 def _validate_archive_member(name: str) -> str:
     normalized = name.replace("\\", "/")
-    path = PurePosixPath(normalized)
-    parts = path.parts
     if not normalized or normalized.endswith("/"):
         return normalized
-    if path.is_absolute():
+    if normalized.startswith("/"):
         raise UnsafeArchivePathError(f"Archive member uses an absolute path: {name}")
-    if any(part in {"", ".", ".."} for part in parts):
+    # PurePosixPath silently drops '.' and empty segments, leaving a path that
+    # differs from the real ZIP member name. Validate raw segments first.
+    parts = normalized.split("/")
+    if "\x00" in normalized or any(part in {"", ".", ".."} or ":" in part for part in parts):
         raise UnsafeArchivePathError(f"Archive member contains an unsafe path segment: {name}")
-    if any(_looks_like_drive(part) for part in parts):
-        raise UnsafeArchivePathError(f"Archive member contains a drive-qualified path: {name}")
-    return path.as_posix()
-
-
-def _looks_like_drive(part: str) -> bool:
-    return len(part) >= 2 and part[1] == ":" and part[0].isalpha()
+    return PurePosixPath(normalized).as_posix()
 
 
 def _parts(value: str) -> tuple[str, ...]:

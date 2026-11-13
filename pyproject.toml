@@ -1,3 +1,11 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["forge*"]
+exclude = ["config*"]
+
 [project]
 name = "daz-forge"
 version = "0.1.0"

@@ -2,18 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
+import tempfile
 from pathlib import Path, PurePosixPath
 import re
+import shutil
+from contextlib import ExitStack
 import xml.etree.ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from forge.analyzer.source import SourceScan, read_source_file
+from forge.analyzer.source import SourceFile, SourceScan, read_source_file
 
 
 @dataclass(frozen=True)
 class DimPackageResult:
     zip_path: Path
-    report_path: Path
     package_name: str
     support_path: str
     installed_files: tuple[str, ...]
@@ -25,6 +28,28 @@ def build_dim_package(
     contract: dict,
     output_folder: Path,
 ) -> DimPackageResult:
+    if scan.hard_errors:
+        raise ValueError("Cannot package incomplete source: " + "; ".join(scan.hard_errors))
+    if scan.duplicates:
+        raise ValueError(
+            "Duplicate content paths must be resolved before packaging: "
+            + ", ".join(item.normalized_key for item in scan.duplicates)
+        )
+    valid_paths = {item.content_path for item in scan.files}
+    for content_path in valid_paths:
+        _validate_content_path(content_path)
+    missing_rows = [
+        str(row.get("path", ""))
+        for row in contract.get("rows", ())
+        if row.get("final", {}).get("editable", True) and row.get("path") not in valid_paths
+    ]
+    if missing_rows:
+        raise ValueError("Review references files absent from the source: " + ", ".join(missing_rows))
+    if scan.source_kind == "dsx":
+        from forge.analyzer.gather import is_daz_base_file
+        forbidden = [item.content_path for item in scan.files if is_daz_base_file(item.content_path)]
+        if forbidden:
+            raise ValueError("DAZ base files are protected from DSX packaging: " + ", ".join(forbidden))
     product = contract.get("product", {})
     product_name = str(product.get("product_name") or Path(scan.source_path).stem)
     package_code = _package_code(product)
@@ -35,7 +60,6 @@ def build_dim_package(
     support_store_name = _support_store_name(product)
     output_folder.mkdir(parents=True, exist_ok=True)
     zip_path = output_folder / f"{package_stem}.zip"
-    report_path = output_folder / f"{package_stem}.report.json"
     support_content_path = f"Runtime/Support/{support_store_name}_{token}_{_support_product_name(product_name)}.dsx"
     support_archive_path = f"Content/{support_content_path}"
     support_script_content_path = PurePosixPath(support_content_path).with_suffix(".dsa").as_posix()
@@ -43,6 +67,7 @@ def build_dim_package(
     support_image_content_path = _support_image_path(support_content_path, str(product.get("product_image") or ""))
 
     file_payloads: dict[str, bytes] = {}
+    source_entries: dict[str, SourceFile] = {}
     skipped_support_files: list[str] = []
     support_asset_paths: list[str] = []
     for source_file in scan.files:
@@ -50,7 +75,7 @@ def build_dim_package(
         if _is_existing_support_file(content_path):
             skipped_support_files.append(content_path)
             continue
-        file_payloads[f"Content/{content_path}"] = read_source_file(scan, source_file)
+        source_entries[f"Content/{content_path}"] = source_file
         support_asset_paths.append(content_path)
 
     product_image_payload = _product_image_payload(scan, str(product.get("product_image") or ""))
@@ -60,41 +85,70 @@ def build_dim_package(
     support_xml = _support_xml(contract, support_content_path, tuple(sorted(set(support_asset_paths))))
     file_payloads[support_archive_path] = support_xml.encode("utf-8")
     file_payloads[support_script_archive_path] = _support_script(product).encode("utf-8")
-    installed_files = tuple(sorted(file_payloads))
+    installed_files = tuple(sorted(set(file_payloads) | set(source_entries)))
     manifest_xml = _manifest_xml(global_id, installed_files)
     supplement_xml = _supplement_xml(product_name)
 
-    with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
-        archive.writestr("Manifest.dsx", manifest_xml)
-        archive.writestr("Supplement.dsx", supplement_xml)
-        for archive_path in installed_files:
-            archive.writestr(archive_path, file_payloads[archive_path])
+    # Write to a sibling temporary file and replace the destination only after
+    # closing a valid ZIP. An interrupted build must not destroy an existing package.
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{zip_path.name}.", suffix=".tmp", dir=output_folder,
+    )
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    try:
+        with ExitStack() as stack:
+            source_zip = stack.enter_context(ZipFile(scan.source_path)) if scan.source_kind == "zip" else None
+            archive = stack.enter_context(ZipFile(temporary_path, "w", ZIP_DEFLATED))
+            archive.writestr("Manifest.dsx", manifest_xml)
+            archive.writestr("Supplement.dsx", supplement_xml)
+            for archive_path in installed_files:
+                if archive_path in file_payloads:
+                    archive.writestr(archive_path, file_payloads[archive_path])
+                    continue
+                source_file = source_entries[archive_path]
+                with archive.open(archive_path, "w") as output:
+                    if source_zip is not None:
+                        with source_zip.open(source_file.source_path) as input_file:
+                            shutil.copyfileobj(input_file, output)
+                    else:
+                        location = (
+                            Path(source_file.source_path) if scan.source_kind == "dsx"
+                            else Path(scan.source_path) / source_file.source_path
+                        )
+                        with location.open("rb") as input_file:
+                            shutil.copyfileobj(input_file, output)
+        os.replace(temporary_path, zip_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
-    report = {
-        "zip_name": zip_path.name,
-        "product_name": product_name,
-        "package_code": package_code,
-        "support_store_name": support_store_name,
-        "store_prefix": str(product.get("store_prefix") or ""),
-        "store_code": str(product.get("store_code") or ""),
-        "product_token": token,
-        "global_id": global_id,
-        "support_path": support_content_path,
-        "support_script_path": support_script_content_path,
-        "product_image_path": support_image_content_path,
-        "installed_files": list(installed_files),
-        "skipped_existing_support_files": skipped_support_files,
-    }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Clean up the sidecar created by older Daz Forge builds of this package.
+    # It is not needed for DIM installation. Failure to remove a locked legacy
+    # report must not turn an otherwise successful ZIP build into an error.
+    legacy_report = output_folder / f"{package_stem}.report.json"
+    try:
+        legacy_report.unlink(missing_ok=True)
+    except OSError:
+        pass
 
     return DimPackageResult(
         zip_path=zip_path,
-        report_path=report_path,
         package_name=zip_path.name,
         support_path=support_content_path,
         installed_files=installed_files,
         skipped_existing_support_files=tuple(skipped_support_files),
     )
+
+
+def _validate_content_path(content_path: str) -> None:
+    if (
+        not content_path
+        or content_path.startswith(("/", "\\"))
+        or "\x00" in content_path
+        or any(segment in {"", ".", ".."} or ":" in segment for segment in content_path.split("/"))
+        or "\\" in content_path
+    ):
+        raise ValueError(f"Unsafe content path in source: {content_path!r}")
 
 
 def _support_xml(contract: dict, support_content_path: str, support_asset_paths: tuple[str, ...]) -> str:

@@ -273,6 +273,28 @@ def resolve_product_token(
 
 def source_identity_from_path(source: Path) -> SourceProductIdentity:
     path = Path(source)
+    # A DSX is already the authoritative identity document. Do not recursively
+    # gather gigabytes of dependencies merely to determine its product token.
+    if path.is_file() and path.suffix.lower() == ".dsx":
+        try:
+            metadata = parse_support_metadata(path.read_bytes())
+        except (OSError, SupportParseError):
+            metadata = None
+        if metadata is not None:
+            normalized_token = _normalize_token(metadata.product_token)
+            normalized_store = _normalize_identity_part(metadata.store_id)
+            normalized_name = _normalize_identity_part(metadata.product_name)
+            if (normalized_store and normalized_token) or normalized_name:
+                return SourceProductIdentity(
+                    source_key=_support_source_key(
+                        normalized_store=normalized_store,
+                        normalized_token=normalized_token,
+                        normalized_name=normalized_name,
+                    ),
+                    source_store_id=metadata.store_id,
+                    source_product_token=normalized_token,
+                    source_product_name=metadata.product_name,
+                )
     try:
         scan = scan_source(path)
     except (SourceScanError, OSError, BadZipFile, LargeZipFile):

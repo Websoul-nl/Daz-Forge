@@ -5,12 +5,14 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGridLayout,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSizePolicy,
     QSplitter,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -30,6 +32,8 @@ class DimPackagerPage(QWidget):
         self.product_tab: QWidget
         self.product_image_tab: QWidget
         self.selected_file_tab: QWidget
+        self.gathered_files_tab: QWidget
+        self.gathered_file_table: QTableWidget
         self.source_toolbar: QWidget
         self.inspector_tabs: QTabWidget
         self._build_layout()
@@ -46,7 +50,9 @@ class DimPackagerPage(QWidget):
         source_bar.setSpacing(8)
         source_bar.addWidget(controller.source_edit, 1)
         source_bar.addWidget(controller.browse_button)
+        source_bar.addWidget(controller.browse_file_button)
         source_bar.addWidget(controller.analyze_button)
+        source_bar.addWidget(controller.gather_button)
         layout.addWidget(self.source_toolbar)
 
         layout.addWidget(controller.summary_label)
@@ -68,9 +74,11 @@ class DimPackagerPage(QWidget):
         self.product_tab = self._build_product_tab()
         self.product_image_tab = self._build_product_image_tab()
         self.selected_file_tab = self._build_selected_file_tab()
+        self.gathered_files_tab = self._build_gathered_files_tab()
         self.inspector_tabs.addTab(self.product_tab, "Product")
         self.inspector_tabs.addTab(self.product_image_tab, "Product Image")
         self.inspector_tabs.addTab(self.selected_file_tab, "Selected File")
+        self.inspector_tabs.addTab(self.gathered_files_tab, "Gathered Files")
         review_splitter.addWidget(self.inspector_tabs)
         review_splitter.setSizes([920, 380])
         layout.addWidget(review_splitter, 1)
@@ -157,3 +165,34 @@ class DimPackagerPage(QWidget):
         self.detail_layout.addLayout(row_action_bar)
         self.detail_layout.addWidget(controller.detail_view, 1)
         return tab
+
+    def _build_gathered_files_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.addWidget(QLabel("Included product files and excluded dependencies"))
+        self.gathered_file_table = QTableWidget(0, 3)
+        self.gathered_file_table.setHorizontalHeaderLabels(["Status", "Content path", "Reason"])
+        self.gathered_file_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.gathered_file_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.gathered_file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.gathered_file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.gathered_file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.gathered_file_table)
+        return tab
+
+    def set_gathered_files(self, entries: list[dict]) -> None:
+        table = self.gathered_file_table
+        table.setSortingEnabled(False)
+        table.setRowCount(len(entries))
+        for row, item in enumerate(entries):
+            values = (
+                str(item.get("status", "")),
+                str(item.get("content_path", "")),
+                str(item.get("reason", "")),
+            )
+            for col, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                cell.setToolTip(str(item.get("source_path", "")) if col == 1 else value)
+                table.setItem(row, col, cell)
+        table.setSortingEnabled(True)

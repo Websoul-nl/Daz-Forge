@@ -294,10 +294,11 @@ def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> No
     window = MainWindow(available_model_providers=())
     page = window.dim_packager_page
 
-    assert page.inspector_tabs.count() == 3
+    assert page.inspector_tabs.count() == 4
     assert page.inspector_tabs.tabText(0) == "Product"
     assert page.inspector_tabs.tabText(1) == "Product Image"
     assert page.inspector_tabs.tabText(2) == "Selected File"
+    assert page.inspector_tabs.tabText(3) == "Gathered Files"
     assert _has_ancestor(window.product_name_edit, page.product_tab)
     assert _has_ancestor(window.store_combo, page.product_tab)
     assert _has_ancestor(window.provider_combo, page.product_tab)
@@ -311,6 +312,81 @@ def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> No
     assert _has_ancestor(window.source_edit, page.source_toolbar)
     assert _has_ancestor(window.analyze_button, page.source_toolbar)
     assert page.footer_layout.itemAt(page.footer_layout.count() - 1).layout() is page.package_action_bar
+
+
+def test_dsx_source_shows_gather_and_populates_preview(qapp, tmp_path: Path) -> None:
+    preset = "Props/Websoul/Hero.duf"
+    write_file(tmp_path / preset, dson("scene_subset"))
+    dsx_path = tmp_path / "Runtime" / "Support" / "Hero.dsx"
+    write_file(
+        dsx_path,
+        """
+        <ContentDBInstall VERSION="1.0"><Products><Product VALUE="Hero">
+          <StoreID VALUE="LOCAL USER"/>
+          <ProductToken VALUE="323232"/>
+          <Assets><Asset VALUE="/Props/Websoul/Hero.duf"/></Assets>
+        </Product></Products></ContentDBInstall>
+        """,
+    )
+    window = MainWindow(available_model_providers=(), run_analysis_synchronously=True)
+    window.set_source_path(dsx_path)
+    assert window.gather_button.isHidden() is False
+    assert window.analyze_button.isHidden() is True
+    assert window.build_package_button.isEnabled() is False
+
+    window.gather_current_source()
+
+    assert window.current_contract["product"]["source_kind"] == "dsx"
+    assert window.current_contract["product"]["product_name"] == "Hero"
+    assert window.current_contract["gathered_files"]
+    assert window.dim_packager_page.gathered_file_table.rowCount() >= 2
+    assert window.build_package_button.isEnabled() is True
+
+
+
+def test_changed_dsx_contents_require_new_gather_before_packaging(qapp, tmp_path: Path) -> None:
+    import os
+
+    source_file = tmp_path / "Props" / "Websoul" / "Hero.duf"
+    write_file(source_file, dson("scene_subset"))
+    dsx_path = tmp_path / "Runtime" / "Support" / "Hero.dsx"
+    write_file(dsx_path, """
+    <ContentDBInstall><Products><Product VALUE="Hero">
+      <StoreID VALUE="LOCAL USER"/>
+      <Assets><Asset VALUE="/Props/Websoul/Hero.duf"/></Assets>
+    </Product></Products></ContentDBInstall>""")
+    window = MainWindow(available_model_providers=(), run_analysis_synchronously=True,
+                        token_registry_path=tmp_path / "tokens.json")
+    window.set_source_path(dsx_path)
+    window.gather_current_source()
+
+    stamp = source_file.stat().st_mtime_ns
+    os.utime(source_file, ns=(stamp, stamp + 5_000_000_000))
+    window.build_current_package()
+
+    assert any("Gathered files have changed" in window.issue_list.item(i).text()
+               for i in range(window.issue_list.count()))
+
+
+def test_failed_regather_disables_build(qapp, tmp_path: Path) -> None:
+    write_file(tmp_path / "Props" / "Websoul" / "Hero.duf", dson("scene_subset"))
+    dsx_path = tmp_path / "Runtime" / "Support" / "Hero.dsx"
+    write_file(dsx_path, """
+    <ContentDBInstall><Products><Product VALUE="Hero">
+      <Assets><Asset VALUE="/Props/Websoul/Hero.duf"/></Assets>
+    </Product></Products></ContentDBInstall>""")
+    window = MainWindow(available_model_providers=(), run_analysis_synchronously=True)
+    window.set_source_path(dsx_path)
+    window.gather_current_source()
+
+    assert window.build_package_button.isEnabled()
+    dsx_path.write_text("<invalid xml", encoding="utf-8")
+    window.gather_current_source()
+
+    assert any("Analysis failed" in window.issue_list.item(i).text()
+               for i in range(window.issue_list.count()))
+    assert not window.build_package_button.isEnabled()
+    assert window.dim_packager_page.gathered_file_table.rowCount() == 0
 
 
 def test_pose_converter_tab_builds_converted_dim_package(qapp, tmp_path: Path) -> None:
@@ -689,8 +765,7 @@ def test_dim_packager_preserves_manual_token_on_build(qapp, tmp_path: Path) -> N
     window.build_current_package()
 
     output = tmp_path / "Daz Forge Packages"
-    report = json.loads(next(output.glob("*.report.json")).read_text(encoding="utf-8"))
-    assert report["product_token"] == "12345678"
+    assert not list(output.glob("*.json"))
     with ZipFile(next(output.glob("*.zip"))) as archive:
         support_xml = archive.read("Content/Runtime/Support/LOCAL_USER_12345678_Manual_Hero.dsx").decode("utf-8")
     assert 'ProductToken VALUE="12345678"' in support_xml
@@ -1249,7 +1324,7 @@ def test_main_window_starts_analysis_without_blocking_ui(qapp, tmp_path: Path) -
 
 
 def test_main_window_busy_state_disables_analysis_controls(qapp) -> None:
-    window = MainWindow()
+    window = MainWindow(available_model_providers=("ollama",))
 
     window._set_analyzing(True)
 
@@ -1301,7 +1376,7 @@ def test_main_window_loads_source_without_model_provider(qapp, tmp_path: Path) -
     def factory(provider_key, model_name):
         raise AssertionError("source loading should not ask the model")
 
-    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True)
+    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True, available_model_providers=("ollama",))
     window.set_source_path(tmp_path)
 
     window.analyze_current_source()
@@ -1320,7 +1395,7 @@ def test_main_window_can_ask_configured_model_provider(qapp, tmp_path: Path) -> 
         requested["model_name"] = model_name
         return StaticProvider()
 
-    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True)
+    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True, available_model_providers=("ollama",))
     window._show_model_suggestions = lambda contract: captured.setdefault("contract", contract)
     window.set_source_path(tmp_path)
     window.analyze_current_source()

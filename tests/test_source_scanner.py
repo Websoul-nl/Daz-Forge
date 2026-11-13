@@ -1,9 +1,10 @@
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
+import stat
 
 import pytest
 
-from forge.analyzer.source import UnsafeArchivePathError, scan_source
+from forge.analyzer.source import SourceScanError, UnsafeArchivePathError, scan_source
 
 
 def write_file(path: Path, text: str = "x") -> None:
@@ -129,3 +130,62 @@ def test_duplicate_normalized_content_paths_are_reported(tmp_path: Path) -> None
     duplicate = scan.duplicates[0]
     assert duplicate.normalized_key == "props/thing.duf"
     assert duplicate.content_paths == ("Props/Thing.duf", "Props/thing.duf")
+
+
+
+@pytest.mark.parametrize("unsafe_member", [
+    "Content//Props/Thing.duf",
+    "Content/./Props/Thing.duf",
+    "Content/Props/../Thing.duf",
+    "Content/Props/C:thing.duf",
+])
+def test_scan_zip_rejects_noncanonical_member_names(tmp_path: Path, unsafe_member: str) -> None:
+    archive = tmp_path / "unsafe.zip"
+    write_zip(archive, [unsafe_member])
+
+    with pytest.raises(UnsafeArchivePathError):
+        scan_source(archive)
+
+
+def test_scan_zip_rejects_symlink_entries(tmp_path: Path) -> None:
+    archive = tmp_path / "symlink.zip"
+    with ZipFile(archive, "w") as zip_file:
+        info = ZipInfo("Content/Props/Linked.duf")
+        info.create_system = 3
+        info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        zip_file.writestr(info, "../target.duf")
+
+    with pytest.raises(SourceScanError, match="symbolic-link"):
+        scan_source(archive)
+
+
+def test_scan_folder_rejects_file_symlink_escaping_root(tmp_path: Path) -> None:
+    root = tmp_path / "Product"
+    outside = tmp_path / "outside.duf"
+    write_file(outside)
+    link = root / "Props" / "Linked.duf"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("File symlink creation is unavailable on this platform")
+
+    with pytest.raises(SourceScanError, match="linked outside"):
+        scan_source(root)
+
+
+def test_zip_content_folder_name_is_case_insensitive(tmp_path: Path) -> None:
+    archive = tmp_path / "product.zip"
+    write_zip(archive, ["content/Props/Hero.duf"])
+    scan = scan_source(archive)
+    assert scan.content_root == "content"
+    assert [item.content_path for item in scan.files] == ["Props/Hero.duf"]
+
+
+
+def test_scan_wrapper_with_lowercase_content_folder(tmp_path: Path) -> None:
+    source = tmp_path / "Download"
+    write_file(source / "Product" / "content" / "Props" / "Hero.duf")
+    scan = scan_source(source)
+    assert scan.content_root == "Product/content"
+    assert [entry.content_path for entry in scan.files] == ["Props/Hero.duf"]

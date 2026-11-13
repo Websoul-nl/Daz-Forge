@@ -104,14 +104,17 @@ def build_review_contract(
     model_by_path = _model_suggestions_by_path(model_result)
     support_by_path = _support_hints_by_path(scan)
     rows = tuple(
-        _build_asset_row(asset, model_by_path.get(asset.path), support_by_path.get(asset.path))
+        _build_asset_row(
+            asset, model_by_path.get(asset.path), support_by_path.get(asset.path),
+            prefer_support=scan.source_kind == "dsx",
+        )
         for asset in inference.assets
     )
     return ReviewGridContract(
         schema_version=1,
         product=_build_product_summary(scan, inventory, inference, model_result),
         rows=rows,
-        warnings=_build_warnings(inventory, inference, model_result),
+        warnings=_build_warnings(scan, inventory, inference, model_result),
         hard_blockers=_build_hard_blockers(scan),
         restructure_plan=RestructurePlan(),
     )
@@ -204,6 +207,8 @@ def _build_asset_row(
     asset: AssetSuggestion,
     model: ModelAssetSuggestion | None,
     support: SupportAssetHint | None,
+    *,
+    prefer_support: bool = False,
 ) -> ReviewAssetRow:
     deterministic = MetadataFields(
         content_type=asset.content_type,
@@ -214,10 +219,12 @@ def _build_asset_row(
         reason="deterministic analyzer",
     )
     final = FinalMetadataFields(
-        content_type=asset.content_type,
-        categories=asset.categories,
-        compatibility_base=asset.compatibility_base,
-        compatibilities=asset.compatibilities,
+        content_type=(support.content_type or asset.content_type) if prefer_support and support else asset.content_type,
+        categories=(support.categories or asset.categories) if prefer_support and support else asset.categories,
+        compatibility_base=(support.compatibility_base or asset.compatibility_base)
+        if prefer_support and support else asset.compatibility_base,
+        compatibilities=(support.compatibilities or asset.compatibilities)
+        if prefer_support and support else asset.compatibilities,
     )
     return ReviewAssetRow(
         path=asset.path,
@@ -260,14 +267,16 @@ def _support_fields(support: SupportAssetHint | None) -> MetadataFields | None:
 
 
 def _build_warnings(
+    scan: SourceScan,
     inventory: InventoryResult,
     inference: InferenceResult,
     model_result: ModelSuggestionResult | None,
 ) -> tuple[ReviewIssue, ...]:
-    issues = [
+    issues = [ReviewIssue(code="gather-warning", message=warning) for warning in scan.warnings]
+    issues.extend([
         ReviewIssue(code="inventory-warning", message=warning)
         for warning in inventory.warnings
-    ]
+    ])
     issues.extend(ReviewIssue(code="inference-warning", message=warning) for warning in inference.warnings)
     if model_result is not None:
         issues.extend(ReviewIssue(code="model-warning", message=warning) for warning in model_result.warnings)

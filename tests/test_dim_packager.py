@@ -1,8 +1,11 @@
 import json
 from pathlib import Path
+from dataclasses import replace
 from zipfile import ZipFile
 
-from forge.analyzer.source import scan_source
+import pytest
+
+from forge.analyzer.source import SourceFile, scan_source
 from forge.packager.dim import build_dim_package
 from forge.ui.main_window import analyze_source
 
@@ -28,7 +31,7 @@ def dson(asset_type: str, author: str = "Websoul") -> bytes:
     ).encode("utf-8")
 
 
-def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path) -> None:
+def test_build_dim_package_writes_only_zip_manifest_and_support(tmp_path: Path) -> None:
     source = tmp_path / "Hero Product"
     output = tmp_path / "out"
     write_file(source / "Props" / "Websoul" / "Hero Prop.duf", dson("scene_subset"))
@@ -57,7 +60,7 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
     result = build_dim_package(scan_source(source), contract, output)
 
     assert result.zip_path.name == "WEB90000000-01_HeroProduct.zip"
-    assert result.report_path.name == "WEB90000000-01_HeroProduct.report.json"
+    assert sorted(path.name for path in output.iterdir()) == [result.zip_path.name]
     with ZipFile(result.zip_path) as archive:
         names = set(archive.namelist())
         assert "Manifest.dsx" in names
@@ -98,17 +101,6 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         assert '<SupportAsset VALUE="/Runtime/Support/WEBSOUL_90000000_Hero_Product.jpg"/>' in support
         assert '<SupportAsset VALUE="/Runtime/Textures/Websoul/Hero.jpg"/>' in support
 
-    report = json.loads(result.report_path.read_text(encoding="utf-8"))
-    assert report["zip_name"] == "WEB90000000-01_HeroProduct.zip"
-    assert report["package_code"] == "WEB"
-    assert report["support_store_name"] == "WEBSOUL"
-    assert report["product_image_path"] == "Runtime/Support/WEBSOUL_90000000_Hero_Product.jpg"
-    assert report["skipped_existing_support_files"] == [
-        "Runtime/Support/OLD_1_Old.dsa",
-        "Runtime/Support/OLD_1_Old.dsx",
-        "Runtime/Support/OLD_1_Old.jpg",
-    ]
-
 
 def test_build_dim_package_combines_store_prefix_and_creator_code_with_six_character_cap(tmp_path: Path) -> None:
     source = tmp_path / "Sade Product"
@@ -137,3 +129,74 @@ def test_build_dim_package_combines_store_prefix_and_creator_code_with_six_chara
         support = archive.read("Content/Runtime/Support/3D_SHARDS_42_Sade_Product.dsx").decode("utf-8")
         assert '<StoreID VALUE="3D SHARDS"/>' in support
         assert '<SupportAssets VALUE="/Runtime/Support/3D_SHARDS_42_Sade_Product.dsx">' in support
+
+
+def test_rebuild_removes_legacy_json_sidecar(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    contract = analyze_source(source)
+    output = tmp_path / "out"
+    original = build_dim_package(scan_source(source), contract, output)
+    old_report = original.zip_path.with_suffix(".report.json")
+    old_report.write_text('{"old":true}', encoding="utf-8")
+
+    result = build_dim_package(scan_source(source), contract, output)
+
+    assert result.zip_path == original.zip_path
+    assert not old_report.exists()
+    assert list(output.glob("*.json")) == []
+    assert [path.name for path in output.iterdir()] == [result.zip_path.name]
+
+
+def test_atomic_build_preserves_existing_zip_on_source_read_failure(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    asset = source / "Props" / "Hero.duf"
+    write_file(asset, dson("scene_subset"))
+    scan = scan_source(source)
+    contract = analyze_source(source)
+    output = tmp_path / "out"
+    original = build_dim_package(scan, contract, output)
+    previous = original.zip_path
+    previous.write_bytes(b"previous valid package")
+    asset.unlink()
+
+    with pytest.raises(OSError):
+        build_dim_package(scan, contract, output)
+
+    assert previous.read_bytes() == b"previous valid package"
+    assert sorted(path.name for path in output.iterdir()) == [previous.name]
+
+
+def test_packager_rejects_duplicate_paths_even_if_invoked_directly(tmp_path: Path) -> None:
+    source = tmp_path / "Product.zip"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("Content/Props/Hero.duf", dson("scene_subset"))
+        archive.writestr("Content/Props/hero.duf", dson("scene_subset"))
+    scan = scan_source(source)
+
+    assert scan.duplicates
+    with pytest.raises(ValueError, match="Duplicate content paths"):
+        build_dim_package(scan, {"product": {}}, tmp_path / "out")
+
+
+
+def test_packager_rejects_missing_review_rows(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    contract = analyze_source(source)
+    contract["rows"].append({"path": "Props/Missing.duf", "final": {"editable": True}})
+
+    with pytest.raises(ValueError, match="Review references files absent"):
+        build_dim_package(scan_source(source), contract, tmp_path / "out")
+
+
+def test_packager_rejects_unsafe_manually_supplied_source_paths(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    scan = scan_source(source)
+    forged = replace(
+        scan,
+        files=(SourceFile("Props/Hero.duf", "Props/../../secrets.txt"),),
+    )
+    with pytest.raises(ValueError, match="Unsafe content path"):
+        build_dim_package(forged, {"product": {}, "rows": []}, tmp_path / "out")

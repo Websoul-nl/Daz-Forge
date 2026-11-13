@@ -294,10 +294,11 @@ def test_packager_page_uses_product_and_selected_file_inspector_tabs(qapp) -> No
     window = MainWindow(available_model_providers=())
     page = window.dim_packager_page
 
-    assert page.inspector_tabs.count() == 3
+    assert page.inspector_tabs.count() == 4
     assert page.inspector_tabs.tabText(0) == "Product"
     assert page.inspector_tabs.tabText(1) == "Product Image"
     assert page.inspector_tabs.tabText(2) == "Selected File"
+    assert page.inspector_tabs.tabText(3) == "Gathered Files"
     assert _has_ancestor(window.product_name_edit, page.product_tab)
     assert _has_ancestor(window.store_combo, page.product_tab)
     assert _has_ancestor(window.provider_combo, page.product_tab)
@@ -1249,7 +1250,7 @@ def test_main_window_starts_analysis_without_blocking_ui(qapp, tmp_path: Path) -
 
 
 def test_main_window_busy_state_disables_analysis_controls(qapp) -> None:
-    window = MainWindow()
+    window = MainWindow(available_model_providers=("ollama",))
 
     window._set_analyzing(True)
 
@@ -1301,7 +1302,7 @@ def test_main_window_loads_source_without_model_provider(qapp, tmp_path: Path) -
     def factory(provider_key, model_name):
         raise AssertionError("source loading should not ask the model")
 
-    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True)
+    window = MainWindow(model_provider_factory=factory, run_analysis_synchronously=True, available_model_providers=("ollama",))
     window.set_source_path(tmp_path)
 
     window.analyze_current_source()

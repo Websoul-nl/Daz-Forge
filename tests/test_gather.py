@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import quoteattr
 from zipfile import ZipFile
 
 import pytest
@@ -20,7 +20,7 @@ def write(path: Path, data: bytes | str = b"x") -> Path:
 
 def dsx_xml(assets: list[str], supporting: list[str], name: str = "Sporty Swimsuit") -> str:
     def node(tag: str, value: str) -> str:
-        return f'<{tag} VALUE="{escape(value, {"\"": "&quot;"})}"/>'
+        return f"<{tag} VALUE={quoteattr(value)}/>"
     assets_xml = "".join(node("Asset", "/" + path) for path in assets)
     support_xml = "".join(node("SupportAsset", "/" + path) for path in supporting)
     return (

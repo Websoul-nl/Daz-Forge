@@ -112,6 +112,15 @@ def build_dim_package(
     finally:
         temporary_path.unlink(missing_ok=True)
 
+    # Clean up the sidecar created by older Daz Forge builds of this package.
+    # It is not needed for DIM installation. Failure to remove a locked legacy
+    # report must not turn an otherwise successful ZIP build into an error.
+    legacy_report = output_folder / f"{package_stem}.report.json"
+    try:
+        legacy_report.unlink(missing_ok=True)
+    except OSError:
+        pass
+
     return DimPackageResult(
         zip_path=zip_path,
         package_name=zip_path.name,

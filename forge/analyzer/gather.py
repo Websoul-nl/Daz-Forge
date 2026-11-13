@@ -135,7 +135,8 @@ def _other_product_owners(roots: tuple[Path, ...], selected: Path) -> dict[str, 
         if not support_dir.is_dir():
             continue
         for path in support_dir.glob("*.dsx"):
-            if path.resolve() == selected.resolve():
+            resolved = path.resolve()
+            if resolved == selected.resolve() or not resolved.is_relative_to(root):
                 continue
             try:
                 metadata = parse_support_metadata(path.read_bytes())
@@ -171,7 +172,7 @@ def _product_prefixes(declared: set[str]) -> set[str]:
                 prefixes.add("/".join(lower[:3]) + "/")
         elif lower[:2] == ["runtime", "textures"] and len(parts) >= 5:
             prefixes.add("/".join(lower[:4]) + "/")
-        elif lower[0] in {"people", "props", "environments", "figures"} and len(parts) >= 5:
+        elif lower[0] in {"people", "props", "environments", "figures"} and len(parts) >= 6:
             prefixes.add("/".join(lower[:-1]) + "/")
     return prefixes
 
@@ -219,8 +220,11 @@ def gather_dsx(dsx: Path, extra_libraries: Iterable[Path] = ()) -> SourceScan:
             if thumbnail:
                 declared.add(path + suffix)
 
-    prefixes = _product_prefixes(declared)
-    owners: dict[str, str] | None = None
+    owners = _other_product_owners(roots, selected)
+    prefixes = _product_prefixes({
+        path for path in declared
+        if not is_daz_base_file(path) and path.casefold() not in owners
+    })
     found: dict[str, SourceFile] = {}
     records: dict[str, GatheredFile] = {}
     warnings: list[str] = []
@@ -250,8 +254,6 @@ def gather_dsx(dsx: Path, extra_libraries: Iterable[Path] = ()) -> SourceScan:
 
         # Another product's ownership claim beats mere references, even if
         # the selected DSX also happens to list that shared dependency.
-        if owners is None:
-            owners = _other_product_owners(roots, selected)
         if key in owners:
             records[key] = GatheredFile(
                 content_path, "external", f"Owned by installed product: {owners[key]}",

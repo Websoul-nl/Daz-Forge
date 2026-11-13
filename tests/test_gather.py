@@ -126,9 +126,9 @@ def test_build_gathered_zip_has_no_external_or_base_dependencies(tmp_path: Path)
         assert "Content/" + FOREIGN not in names
         assert "Manifest.dsx" in names
         assert "Supplement.dsx" in names
-    report = json.loads(result.report_path.read_text(encoding="utf-8"))
-    assert any(entry["status"] == "base" and entry["content_path"] == EYES
-               for entry in report["gathered_files"])
+    assert sorted(path.name for path in (tmp_path / "out").iterdir()) == [result.zip_path.name]
+    assert any(entry.status == "base" and entry.content_path == EYES
+               for entry in scan_source(dsx).gathered_files)
 
 
 def test_missing_declared_file_blocks_packaging(tmp_path: Path) -> None:

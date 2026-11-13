@@ -28,7 +28,7 @@ def dson(asset_type: str, author: str = "Websoul") -> bytes:
     ).encode("utf-8")
 
 
-def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path) -> None:
+def test_build_dim_package_writes_only_zip_manifest_and_support(tmp_path: Path) -> None:
     source = tmp_path / "Hero Product"
     output = tmp_path / "out"
     write_file(source / "Props" / "Websoul" / "Hero Prop.duf", dson("scene_subset"))
@@ -57,7 +57,7 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
     result = build_dim_package(scan_source(source), contract, output)
 
     assert result.zip_path.name == "WEB90000000-01_HeroProduct.zip"
-    assert result.report_path.name == "WEB90000000-01_HeroProduct.report.json"
+    assert sorted(path.name for path in output.iterdir()) == [result.zip_path.name]
     with ZipFile(result.zip_path) as archive:
         names = set(archive.namelist())
         assert "Manifest.dsx" in names
@@ -97,17 +97,6 @@ def test_build_dim_package_writes_zip_manifest_support_and_report(tmp_path: Path
         assert '<SupportAsset VALUE="/Props/Websoul/Hero Prop.duf.png"/>' in support
         assert '<SupportAsset VALUE="/Runtime/Support/WEBSOUL_90000000_Hero_Product.jpg"/>' in support
         assert '<SupportAsset VALUE="/Runtime/Textures/Websoul/Hero.jpg"/>' in support
-
-    report = json.loads(result.report_path.read_text(encoding="utf-8"))
-    assert report["zip_name"] == "WEB90000000-01_HeroProduct.zip"
-    assert report["package_code"] == "WEB"
-    assert report["support_store_name"] == "WEBSOUL"
-    assert report["product_image_path"] == "Runtime/Support/WEBSOUL_90000000_Hero_Product.jpg"
-    assert report["skipped_existing_support_files"] == [
-        "Runtime/Support/OLD_1_Old.dsa",
-        "Runtime/Support/OLD_1_Old.dsx",
-        "Runtime/Support/OLD_1_Old.jpg",
-    ]
 
 
 def test_build_dim_package_combines_store_prefix_and_creator_code_with_six_character_cap(tmp_path: Path) -> None:

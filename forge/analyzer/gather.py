@@ -15,7 +15,7 @@ from urllib.parse import unquote
 
 from forge.analyzer.dson import DsonParseError, _decode_dson_bytes
 from forge.analyzer.source import (
-    DAZ_ROOTS, DuplicateContentPath, GatheredFile, SourceFile, SourceScan,
+    DAZ_ROOTS, GatheredFile, SourceFile, SourceScan,
     SourceScanError, _find_duplicates,
 )
 from forge.analyzer.support import SupportParseError, parse_support_metadata

@@ -57,6 +57,8 @@ class GatheredFile:
     status: str
     reason: str
     source_path: str = ""
+    size_bytes: int = 0
+    modified_ns: int = 0
 
 
 @dataclass(frozen=True)

@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QTableView,
-    QTableWidgetItem,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -401,6 +400,14 @@ class MainWindow(QMainWindow):
 
     def _refresh_gather_controls(self) -> None:
         source_text = self.source_edit.text().strip()
+        normalized_source = str(Path(source_text).resolve()) if source_text else ""
+        previous_source = getattr(self, "_last_gather_selection", None)
+        if previous_source is not None and previous_source != normalized_source:
+            # Returning to a previous path must require a fresh Gather.
+            self.current_contract.pop("gather_source", None)
+            self.current_contract.pop("gathered_files", None)
+            self.dim_packager_page.set_gathered_files([])
+        self._last_gather_selection = normalized_source
         is_dsx = Path(source_text).suffix.lower() == ".dsx"
         self.gather_button.setVisible(is_dsx)
         self.analyze_button.setVisible(not is_dsx)
@@ -415,6 +422,11 @@ class MainWindow(QMainWindow):
         if source.suffix.lower() != ".dsx":
             self._set_issue_lines(["Select a product DSX file to gather."])
             return
+        # Discard an old successful manifest before attempting a new scan.
+        # A failed Gather must never leave a stale build enabled.
+        self.current_contract.pop("gather_source", None)
+        self.current_contract.pop("gathered_files", None)
+        self.dim_packager_page.set_gathered_files([])
         self._refresh_gather_controls()
         if self.run_analysis_synchronously:
             self._run_analysis_synchronously(source, None)
@@ -951,9 +963,15 @@ class MainWindow(QMainWindow):
             return
         self._clear_product_token_warnings("product-token-collision")
         try:
+            fresh_scan = scan_source(source, extra_libraries=self._analysis_library_roots())
+            if fresh_scan.source_kind == "dsx" and (
+                [asdict(item) for item in fresh_scan.gathered_files]
+                != self.current_contract.get("gathered_files")
+            ):
+                raise ValueError("Gathered files have changed. Click Gather again to review before building.")
             self._save_current_store_to_catalog()
             result = build_dim_package(
-                scan_source(source, extra_libraries=self._analysis_library_roots()),
+                fresh_scan,
                 self.current_contract,
                 self._package_output_folder(source),
             )
@@ -1196,6 +1214,10 @@ class MainWindow(QMainWindow):
         self._set_analyzing(False)
 
     def _analysis_failed(self, message: str) -> None:
+        if Path(self.source_edit.text().strip()).suffix.lower() == ".dsx":
+            self.current_contract.pop("gather_source", None)
+            self.current_contract.pop("gathered_files", None)
+            self.dim_packager_page.set_gathered_files([])
         self.summary_label.setText("Analysis failed")
         self._set_issue_lines([f"Analysis failed: {message}"])
         self._analysis_progress(f"Analysis failed: {message}")

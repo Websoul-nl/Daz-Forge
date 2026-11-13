@@ -180,3 +180,12 @@ def test_zip_content_folder_name_is_case_insensitive(tmp_path: Path) -> None:
     scan = scan_source(archive)
     assert scan.content_root == "content"
     assert [item.content_path for item in scan.files] == ["Props/Hero.duf"]
+
+
+
+def test_scan_wrapper_with_lowercase_content_folder(tmp_path: Path) -> None:
+    source = tmp_path / "Download"
+    write_file(source / "Product" / "content" / "Props" / "Hero.duf")
+    scan = scan_source(source)
+    assert scan.content_root == "Product/content"
+    assert [entry.content_path for entry in scan.files] == ["Props/Hero.duf"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from typing import Any, Protocol
-from urllib.error import HTTPError, URLError
+from urllib.error import URLError
 import urllib.request
 
 from forge.analyzer.inference import InferenceResult

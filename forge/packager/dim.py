@@ -35,6 +35,16 @@ def build_dim_package(
             "Duplicate content paths must be resolved before packaging: "
             + ", ".join(item.normalized_key for item in scan.duplicates)
         )
+    valid_paths = {item.content_path for item in scan.files}
+    for content_path in valid_paths:
+        _validate_content_path(content_path)
+    missing_rows = [
+        str(row.get("path", ""))
+        for row in contract.get("rows", ())
+        if row.get("final", {}).get("editable", True) and row.get("path") not in valid_paths
+    ]
+    if missing_rows:
+        raise ValueError("Review references files absent from the source: " + ", ".join(missing_rows))
     if scan.source_kind == "dsx":
         from forge.analyzer.gather import is_daz_base_file
         forbidden = [item.content_path for item in scan.files if is_daz_base_file(item.content_path)]
@@ -128,6 +138,17 @@ def build_dim_package(
         installed_files=installed_files,
         skipped_existing_support_files=tuple(skipped_support_files),
     )
+
+
+def _validate_content_path(content_path: str) -> None:
+    if (
+        not content_path
+        or content_path.startswith(("/", "\\"))
+        or "\x00" in content_path
+        or any(segment in {"", ".", ".."} or ":" in segment for segment in content_path.split("/"))
+        or "\\" in content_path
+    ):
+        raise ValueError(f"Unsafe content path in source: {content_path!r}")
 
 
 def _support_xml(contract: dict, support_content_path: str, support_asset_paths: tuple[str, ...]) -> str:

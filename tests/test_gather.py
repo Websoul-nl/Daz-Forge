@@ -138,7 +138,7 @@ def test_missing_declared_file_blocks_packaging(tmp_path: Path) -> None:
     assert any("Product file missing:" in error for error in scan.hard_errors)
     assert any(entry.content_path == MORPH and entry.status == "missing"
                for entry in scan.gathered_files)
-    with pytest.raises(ValueError, match="incomplete gathered source"):
+    with pytest.raises(ValueError, match="incomplete source"):
         build_dim_package(scan, analyze_source(dsx), tmp_path / "out")
 
 

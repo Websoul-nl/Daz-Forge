@@ -149,8 +149,7 @@ want a redistributable **personal backup**/DIM-style package of its own files.
    and script dependencies. Complete the usual Product and Selected File
    review and click **Build Package**.
 
-The generated `.report.json` includes the gathered-file statuses and reasons
-for exclusions. The ZIP retains normal relative `Content/...` paths.
+The gathered-file review remains in the application; no extra JSON report is written next to the ZIP. The ZIP retains normal relative `Content/...` paths.
 
 **Important limitations:** Static dependency traversal cannot execute DAZ
 scripts or prove ownership from references alone. `SupportAssets` is often

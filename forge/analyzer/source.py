@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from typing import Iterable
 from zipfile import ZipFile
 
 
@@ -51,6 +52,14 @@ class DuplicateContentPath:
 
 
 @dataclass(frozen=True)
+class GatheredFile:
+    content_path: str
+    status: str
+    reason: str
+    source_path: str = ""
+
+
+@dataclass(frozen=True)
 class SourceScan:
     source_kind: str
     source_path: str
@@ -59,20 +68,26 @@ class SourceScan:
     duplicates: tuple[DuplicateContentPath, ...]
     warnings: tuple[str, ...] = ()
     hard_errors: tuple[str, ...] = ()
+    gathered_files: tuple[GatheredFile, ...] = ()
 
 
-def scan_source(path: Path) -> SourceScan:
+def scan_source(path: Path, extra_libraries: Iterable[Path] = ()) -> SourceScan:
     source = Path(path)
     if source.is_dir():
         return _scan_folder(source)
     if source.is_file() and source.suffix.lower() == ".zip":
         return _scan_zip(source)
-    raise SourceScanError(f"Source must be a folder or zip file: {source}")
+    if source.is_file() and source.suffix.lower() == ".dsx":
+        from forge.analyzer.gather import gather_dsx
+        return gather_dsx(source, extra_libraries)
+    raise SourceScanError(f"Source must be a folder, zip or product DSX file: {source}")
 
 
 
 
 def read_source_file(scan: SourceScan, source_file: SourceFile) -> bytes:
+    if scan.source_kind == "dsx":
+        return Path(source_file.source_path).read_bytes()
     if scan.source_kind == "folder":
         return (Path(scan.source_path) / source_file.source_path).read_bytes()
     if scan.source_kind == "zip":

@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from zipfile import ZipFile
 
+import pytest
+
 from forge.analyzer.source import scan_source
 from forge.packager.dim import build_dim_package
 from forge.ui.main_window import analyze_source
@@ -126,3 +128,50 @@ def test_build_dim_package_combines_store_prefix_and_creator_code_with_six_chara
         support = archive.read("Content/Runtime/Support/3D_SHARDS_42_Sade_Product.dsx").decode("utf-8")
         assert '<StoreID VALUE="3D SHARDS"/>' in support
         assert '<SupportAssets VALUE="/Runtime/Support/3D_SHARDS_42_Sade_Product.dsx">' in support
+
+
+def test_rebuild_removes_legacy_json_sidecar(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    contract = analyze_source(source)
+    output = tmp_path / "out"
+    original = build_dim_package(scan_source(source), contract, output)
+    old_report = original.zip_path.with_suffix(".report.json")
+    old_report.write_text('{"old":true}', encoding="utf-8")
+
+    result = build_dim_package(scan_source(source), contract, output)
+
+    assert result.zip_path == original.zip_path
+    assert not old_report.exists()
+    assert list(output.glob("*.json")) == []
+    assert [path.name for path in output.iterdir()] == [result.zip_path.name]
+
+
+def test_atomic_build_preserves_existing_zip_on_source_read_failure(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    asset = source / "Props" / "Hero.duf"
+    write_file(asset, dson("scene_subset"))
+    scan = scan_source(source)
+    contract = analyze_source(source)
+    output = tmp_path / "out"
+    output.mkdir()
+    previous = output / "LU90000000-01_Product.zip"
+    previous.write_bytes(b"previous valid package")
+    asset.unlink()
+
+    with pytest.raises(OSError):
+        build_dim_package(scan, contract, output)
+
+    assert previous.read_bytes() == b"previous valid package"
+    assert sorted(path.name for path in output.iterdir()) == [previous.name]
+
+
+def test_packager_rejects_duplicate_paths_even_if_invoked_directly(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    write_file(source / "Props" / "hero.duf", dson("scene_subset"))
+    scan = scan_source(source)
+
+    assert scan.duplicates
+    with pytest.raises(ValueError, match="Duplicate content paths"):
+        build_dim_package(scan, {"product": {}}, tmp_path / "out")

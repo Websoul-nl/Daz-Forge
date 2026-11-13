@@ -44,7 +44,16 @@ BASE_TEXTURES = re.compile(
 def is_daz_base_file(content_path: str) -> bool:
     """Conservative built-in blacklist; installed base ownership is also checked."""
     normalized = content_path.replace("\\", "/").lstrip("/")
-    return bool(BASE_DATA.search(normalized) or BASE_TEXTURES.search(normalized))
+    lower = normalized.casefold()
+    # Morphs/UV Sets are extensibility points beneath the Genesis base folder.
+    # A vendor's morph or UV set is not itself Genesis base data.
+    if BASE_DATA.search(normalized):
+        if "/morphs/" in lower:
+            return bool(re.search(r"/morphs/daz 3d/(?:base/|genesis(?:[ /_-]|$))", lower))
+        if "/uv sets/" in lower:
+            return bool(re.search(r"/uv sets/daz 3d/(?:base/|genesis(?:[ /_-]|$))", lower))
+        return True
+    return bool(BASE_TEXTURES.search(normalized))
 
 
 def _normalized_path(raw: str, *, parent: str = "") -> str:

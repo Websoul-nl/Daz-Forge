@@ -1,10 +1,11 @@
 import json
 from pathlib import Path
+from dataclasses import replace
 from zipfile import ZipFile
 
 import pytest
 
-from forge.analyzer.source import scan_source
+from forge.analyzer.source import SourceFile, scan_source
 from forge.packager.dim import build_dim_package
 from forge.ui.main_window import analyze_source
 
@@ -176,3 +177,26 @@ def test_packager_rejects_duplicate_paths_even_if_invoked_directly(tmp_path: Pat
     assert scan.duplicates
     with pytest.raises(ValueError, match="Duplicate content paths"):
         build_dim_package(scan, {"product": {}}, tmp_path / "out")
+
+
+
+def test_packager_rejects_missing_review_rows(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    contract = analyze_source(source)
+    contract["rows"].append({"path": "Props/Missing.duf", "final": {"editable": True}})
+
+    with pytest.raises(ValueError, match="Review references files absent"):
+        build_dim_package(scan_source(source), contract, tmp_path / "out")
+
+
+def test_packager_rejects_unsafe_manually_supplied_source_paths(tmp_path: Path) -> None:
+    source = tmp_path / "Product"
+    write_file(source / "Props" / "Hero.duf", dson("scene_subset"))
+    scan = scan_source(source)
+    forged = replace(
+        scan,
+        files=(SourceFile("Props/Hero.duf", "Props/../../secrets.txt"),),
+    )
+    with pytest.raises(ValueError, match="Unsafe content path"):
+        build_dim_package(forged, {"product": {}, "rows": []}, tmp_path / "out")

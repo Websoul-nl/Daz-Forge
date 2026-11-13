@@ -4,7 +4,6 @@ from dataclasses import dataclass
 import gzip
 import io
 import json
-from typing import Any
 from zipfile import ZipFile, is_zipfile
 
 

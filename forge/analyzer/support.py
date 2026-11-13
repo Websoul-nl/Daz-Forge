@@ -27,6 +27,7 @@ class SupportMetadata:
     product_token: str
     artists: tuple[str, ...]
     assets: tuple[SupportAssetHint, ...]
+    support_assets: tuple[str, ...] = ()
 
 
 def parse_support_metadata(data: bytes) -> SupportMetadata:
@@ -46,6 +47,7 @@ def parse_support_metadata(data: bytes) -> SupportMetadata:
         product_token=_child_value(product, "ProductToken"),
         artists=tuple(_values(product.findall("./Artists/Artist"))),
         assets=tuple(_parse_asset(asset) for asset in product.findall("./Assets/Asset")),
+        support_assets=tuple(_values(product.findall("./SupportAssets/SupportAsset"))),
     )
 
 

@@ -461,7 +461,7 @@ class MainWindow(QMainWindow):
         if not product:
             return "No source analyzed"
         artists = ", ".join(product.get("artists", [])) or "-"
-        return (
+        summary = (
             f"Type: {product.get('product_type', '-')}    "
             f"Artist: {product.get('primary_artist') or artists}    "
             f"Rows: {product.get('smart_content_count', 0)}    "
@@ -469,6 +469,19 @@ class MainWindow(QMainWindow):
             f"Files: {product.get('total_files', 0)}    "
             f"Model: {product.get('model_provider') or 'off'}"
         )
+        if self.current_contract.get("gathered_files"):
+            counts: dict[str, int] = {}
+            for item in self.current_contract["gathered_files"]:
+                status = str(item.get("status", ""))
+                counts[status] = counts.get(status, 0) + 1
+            summary += (
+                f"    Gather: {counts.get('included', 0)} included, "
+                f"{counts.get('base', 0)} DAZ base, "
+                f"{counts.get('external', 0)} external, "
+                f"{counts.get('unknown', 0)} unknown, "
+                f"{counts.get('missing', 0)} missing"
+            )
+        return summary
 
     def issue_text(self) -> str:
         return "\n".join(self._issue_lines())
@@ -1410,6 +1423,9 @@ class MainWindow(QMainWindow):
         configured = self.app_settings.dim_downloads_folder or self.app_settings.default_output_folder
         if configured:
             return Path(configured)
+        if source.suffix.lower() == ".dsx" and source.parent.name.lower() == "support":
+            # Never place generated ZIPs inside an installed Runtime/Support folder.
+            return source.parent.parent.parent.parent / "Daz Forge Packages"
         return source.parent / "Daz Forge Packages"
 
     def _matching_store(self, value: str) -> StoreSettings | None:

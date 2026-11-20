@@ -4,7 +4,6 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 import re
-import shutil
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -1083,10 +1082,10 @@ class MainWindow(QMainWindow):
 
     def _provider_changed(self, provider_name: str) -> None:
         current_model = self.model_name_edit.text().strip()
-        if provider_name == "Ollama" and current_model in ("", "qwen/qwen3-4b", "qwen/qwen3-32b"):
+        if provider_name == "Ollama" and current_model in ("", "qwen3-4b", "qwen/qwen3-32b"):
             self.model_name_edit.setText("qwen3:4b")
         elif provider_name == "LM Studio" and current_model in ("", "qwen3:4b", "qwen3:8b"):
-            self.model_name_edit.setText("qwen/qwen3-4b")
+            self.model_name_edit.setText("qwen3-4b")
         self._update_model_controls()
 
     def _update_model_controls(self) -> None:
@@ -1111,12 +1110,9 @@ class MainWindow(QMainWindow):
         return "off"
 
     def _detect_available_model_providers(self) -> tuple[str, ...]:
-        providers = []
-        if shutil.which("ollama"):
-            providers.append("ollama")
-        if shutil.which("lms"):
-            providers.append("lm-studio")
-        return tuple(providers)
+        # The HTTP service does not require lms to be on PATH.
+        # Ollama remains an explicit legacy provider, never an auto-selected Windows engine.
+        return ("lm-studio",)
 
     def _provider_labels(self) -> list[str]:
         labels = []
@@ -1128,17 +1124,17 @@ class MainWindow(QMainWindow):
         return labels
 
     def _default_provider_label(self) -> str:
-        if "ollama" in self.available_model_providers:
-            return "Ollama"
         if "lm-studio" in self.available_model_providers:
             return "LM Studio"
+        if "ollama" in self.available_model_providers:
+            return "Ollama"
         return "Off"
 
     def _default_model_name(self, provider_name: str) -> str:
         if provider_name == "Ollama":
             return "qwen3:4b"
         if provider_name == "LM Studio":
-            return "qwen/qwen3-4b"
+            return "qwen3-4b"
         return ""
 
     def _default_model_provider_factory(
@@ -1149,7 +1145,7 @@ class MainWindow(QMainWindow):
         if provider_key == "ollama":
             return OllamaProvider(model=model_name or "qwen3:4b", timeout_seconds=120)
         if provider_key == "lm-studio":
-            return LMStudioProvider(model=model_name or "qwen/qwen3-4b", timeout_seconds=120)
+            return LMStudioProvider(model=model_name or "qwen3-4b", timeout_seconds=120)
         raise ValueError(f"Unknown model provider: {provider_key}")
 
     def _run_analysis_synchronously(

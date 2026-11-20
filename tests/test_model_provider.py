@@ -121,6 +121,7 @@ def test_lm_studio_provider_sends_openai_compatible_request(monkeypatch) -> None
         def read(self):
             return json.dumps(
                 {
+                    "model": "local-test",
                     "choices": [
                         {
                             "message": {
@@ -142,6 +143,10 @@ def test_lm_studio_provider_sends_openai_compatible_request(monkeypatch) -> None
             ).encode("utf-8")
 
     def fake_urlopen(request, timeout):
+        if request.get_method() == "GET":
+            response = FakeResponse()
+            response.read = lambda: json.dumps({"models": [{"key": "local-test", "type": "llm", "loaded_instances": [{"id": "local-test"}]}]}).encode()
+            return response
         captured["url"] = request.full_url
         captured["timeout"] = timeout
         captured["payload"] = json.loads(request.data.decode("utf-8"))
@@ -263,3 +268,24 @@ def test_lm_studio_provider_wraps_connection_errors(monkeypatch) -> None:
 
     assert result.available is False
     assert result.warnings == ("model-unavailable: connection refused",)
+
+
+def test_lm_studio_loads_the_selected_model_before_requesting_suggestions(monkeypatch):
+    provider = LMStudioProvider(model="qwen3-4b")
+    calls = []
+    def native(path, payload=None):
+        calls.append((path, payload))
+        if payload is None:
+            return {"models": [{"key": "qwen3-4b", "type": "llm", "loaded_instances": []}]}
+        return {"instance_id": "qwen-loaded"}
+    monkeypatch.setattr(provider, "_native_request", native)
+    assert provider._selected_instance() == "qwen-loaded"
+    assert calls[1] == ("/api/v1/models/load", {"model": "qwen3-4b", "context_length": 8192, "eval_batch_size": 512, "flash_attention": True})
+
+
+def test_lm_studio_missing_model_does_not_use_another_loaded_model(monkeypatch):
+    from pytest import raises
+    provider = LMStudioProvider(model="missing")
+    monkeypatch.setattr(provider, "_native_request", lambda *args: {"models": [{"key": "other", "type": "llm", "loaded_instances": [{"id": "other"}]}]})
+    with raises(ModelUnavailableError, match="not available"):
+        provider._selected_instance()

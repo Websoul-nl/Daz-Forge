@@ -1418,11 +1418,11 @@ def test_main_window_has_source_analyze_and_ask_model_actions(qapp) -> None:
     assert window.ask_model_button.text() == "Ask Model"
 
 
-def test_model_provider_controls_default_to_ollama_and_can_be_disabled(qapp) -> None:
+def test_model_provider_controls_default_to_lm_studio_and_can_be_disabled(qapp) -> None:
     window = MainWindow(available_model_providers=("ollama", "lm-studio"))
 
-    assert window.provider_combo.currentText() == "Ollama"
-    assert window.model_name_edit.text() == "qwen3:4b"
+    assert window.provider_combo.currentText() == "LM Studio"
+    assert window.model_name_edit.text() == "qwen3-4b"
     assert window.model_name_edit.isEnabled() is True
     assert window.ask_model_button.isEnabled() is True
 
@@ -1437,7 +1437,7 @@ def test_model_provider_switch_updates_default_model_name(qapp) -> None:
 
     window.provider_combo.setCurrentText("LM Studio")
 
-    assert window.model_name_edit.text() == "qwen/qwen3-4b"
+    assert window.model_name_edit.text() == "qwen3-4b"
 
 
 def test_model_provider_selector_hides_not_installed_providers(qapp) -> None:
@@ -1664,3 +1664,9 @@ def test_editable_text_columns_use_compact_table_editor(qapp) -> None:
     window.mark_selected_issue_reviewed()
 
     assert "Dress.duf: support-category-conflict" not in window.issue_text()
+
+
+def test_windows_provider_discovery_does_not_select_installed_ollama(qapp):
+    window = MainWindow()
+    assert window.available_model_providers == ("lm-studio",)
+    assert window.provider_combo.currentText() == "LM Studio"

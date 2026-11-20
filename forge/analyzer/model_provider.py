@@ -183,6 +183,8 @@ class OpenAICompatibleProvider:
         except json.JSONDecodeError as exc:
             raise ModelProviderError(f"LM Studio returned invalid JSON: {exc}") from exc
 
+        if getattr(self, "name", "") == "lm-studio" and response_payload.get("model") != payload["model"]:
+            raise ModelProviderError("LM Studio answered with a different model; suggestions were discarded")
         return _extract_openai_json_content(response_payload)
 
     def _extra_payload(self) -> dict[str, Any]:
@@ -195,10 +197,39 @@ class LMStudioProvider(OpenAICompatibleProvider):
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:1234/v1",
-        model: str = "local-model",
+        model: str = "qwen3-4b",
         timeout_seconds: int = 30,
     ) -> None:
         super().__init__(base_url=base_url, model=model, timeout_seconds=timeout_seconds)
+
+
+    def _native_request(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        origin = self.base_url.removesuffix("/v1")
+        request = urllib.request.Request(origin + path,
+            data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+            headers={"Content-Type": "application/json"}, method="POST" if payload is not None else "GET")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds if payload is not None else min(5, self.timeout_seconds)) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (URLError, OSError) as exc:
+            raise ModelUnavailableError(str(getattr(exc, "reason", exc))) from exc
+        except (ValueError, TypeError) as exc:
+            raise ModelProviderError("LM Studio returned an invalid model catalog") from exc
+
+    def _selected_instance(self) -> str:
+        catalog = self._native_request("/api/v1/models")
+        selected = next((m for m in catalog.get("models", []) if m.get("key") == self.model and m.get("type") == "llm"), None)
+        if selected is None:
+            raise ModelUnavailableError(f"The selected model {self.model!r} is not available in LM Studio")
+        instances = selected.get("loaded_instances", [])
+        instance = instances[0].get("id") if instances else self._native_request("/api/v1/models/load", {
+            "model": self.model, "context_length": 8192, "eval_batch_size": 512, "flash_attention": True}).get("instance_id")
+        if not isinstance(instance, str) or not instance:
+            raise ModelUnavailableError("LM Studio did not provide a loaded model identifier")
+        return instance
+
+    def _extra_payload(self) -> dict[str, Any]:
+        return {"model": self._selected_instance(), "reasoning_effort": "none", "chat_template_kwargs": {"enable_thinking": False}}
 
 
 class OllamaProvider(OpenAICompatibleProvider):

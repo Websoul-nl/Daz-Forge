@@ -205,16 +205,7 @@ The converter is not a perfect substitute for a DAZ-authored converter. Test a f
 
 Daz Forge can ask a local model for metadata suggestions. This is optional.
 
-Supported providers:
-
-- Ollama, default URL `http://127.0.0.1:11434`
-- LM Studio, default URL `http://127.0.0.1:1234/v1`
-
-Suggested small model:
-
-```powershell
-ollama pull qwen3:4b
-```
+The Windows app selects LM Studio at `http://127.0.0.1:1234/v1`. Enable its local server and use the installed model key `qwen3-4b`. The app loads the selected model explicitly and verifies its identity before accepting suggestions. Off disables model suggestions. An installed Ollama CLI no longer changes the default. The legacy Ollama adapter remains available to explicit integrations.
 
 Model suggestions are shown as suggestions. You choose which ones to apply.
 

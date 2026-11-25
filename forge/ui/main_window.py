@@ -58,6 +58,7 @@ from forge.product_tokens import (
 from forge.settings import AppSettings, StoreSettings, load_store_catalog, save_settings, upsert_store
 from forge.ui.delegates import CONTENT_TYPE_OPTIONS, CompactLineEditDelegate, SearchableComboDelegate
 from forge.ui.pages.dim_packager_page import DimPackagerPage
+from forge.ui.pages.character_conversion_page import CharacterConversionPage
 from forge.ui.pages.pose_converter_page import PoseConverterPage
 from forge.ui.review_model import ReviewTableModel
 
@@ -532,6 +533,12 @@ class MainWindow(QMainWindow):
             return
         local_path = urls[0].toLocalFile()
         if local_path:
+            path = Path(local_path)
+            if self.tabs.currentWidget() is self.character_conversion_page:
+                if path.suffix.casefold() in {".duf", ".dsx"}:
+                    self.character_conversion_page.set_source(path)
+                    event.acceptProposedAction()
+                return
             if self.tabs.currentWidget() is self.pose_converter_page:
                 self.set_pose_source_path(Path(local_path))
             else:
@@ -550,7 +557,15 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.dim_packager_page, "DIM Packager")
         self.pose_converter_page = PoseConverterPage(self)
         self.tabs.addTab(self.pose_converter_page, "Pose Converters")
+        self.character_conversion_page = CharacterConversionPage(output=self.app_settings.default_output_folder)
+        self.tabs.addTab(self.character_conversion_page, "Character Conversion")
         self.tabs.setCornerWidget(self.settings_button, Qt.Corner.TopRightCorner)
+
+    def closeEvent(self, event) -> None:
+        if self.character_conversion_page.is_running():
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _connect_signals(self) -> None:
         self.browse_button.clicked.connect(self._browse_source)

@@ -9,4 +9,11 @@ if (-not (Test-Path -LiteralPath $python)) {
     exit 1
 }
 
+& $python -c "from importlib.util import find_spec; raise SystemExit(any(find_spec(name) is None for name in ('PySide6', 'numpy')))"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Daz Forge dependencies are missing from this virtual environment."
+    Write-Host 'Run: .\.venv\Scripts\python.exe -m pip install -e .'
+    exit 1
+}
+
 & $python -m forge.ui.app @args

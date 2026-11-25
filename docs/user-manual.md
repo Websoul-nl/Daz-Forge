@@ -38,10 +38,10 @@ Install dependencies:
 .\.venv\Scripts\python.exe -m pip install -e .
 ```
 
-If editable install is not available in your environment, install PySide6 directly:
+If editable install is not available in your environment, install PySide6 and NumPy directly:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install PySide6
+.\.venv\Scripts\python.exe -m pip install PySide6 numpy
 ```
 
 ## Starting Daz Forge
@@ -49,7 +49,7 @@ If editable install is not available in your environment, install PySide6 direct
 Use either start script from the project folder:
 
 ```powershell
-.\Start Daz Forge.ps1
+& ".\Start Daz Forge.ps1"
 ```
 
 or double-click:
@@ -202,6 +202,49 @@ For an installed product, select its DSX inside the library's `Runtime/Support` 
 For Genesis 9 to Genesis 8, choose whether to create Female, Male, both separate target folders, or a merged `People/Genesis 8/Poses` output.
 
 The converter is not a perfect substitute for a DAZ-authored converter. Test a few poses visually in DAZ Studio.
+
+## Character Conversion
+
+1. Drop an installed product DSX from its library's `Runtime/Support` folder
+   onto **Character Conversion**, or browse to it. Forge finds the full-skin
+   DUFs listed in the product. Choose one when there is more than one. Only
+   the product's listed material variants are considered; missing presets
+   and other full skins appear in the report.
+2. To convert a loose full-skin DUF instead, drop or browse to it and
+   optionally select its variant folder. A preset may not declare its UVs;
+   confirm the source UV only when known.
+3. Enter the character name, select the library containing Genesis 9 Starter
+   Essentials, and choose an export folder outside your DAZ libraries. Click
+   **Export Materials**.
+
+Iray Uber is the primary export for an Uber source. Check **Also export
+PBRSkin** for a second, approximate shader conversion. A PBRSkin source
+offers PBRSkin only. Apply one full-skin preset at a time. The export
+contains a private ZIP, the unpacked content, and `Review.json`. The
+tab shows the review items as well. Exporting does not install content,
+alter a DAZ scene, or overwrite an earlier export.
+
+The initial UV bundles cover G8 Base Female and Base Male, G8.1 native
+Female and Male, and G8.1 Male on legacy Base Male. Other layouts need
+their own verified transfer. Forge uses its bundled transfer data automatically.
+A source checkout without the bundles shows a **UV transfer override** folder
+picker. The selected folder must contain the layout manifests and their atlas
+files; Forge does not generate missing atlases or guess a replacement UV.
+
+Release builds include the verified data staged under
+`forge/material_converter/uv_transfers/`. Stage the prepared layout manifests
+and their matching atlas directories there before building the wheel. The binary
+data is not tracked in Git.
+
+Forge preserves supported skin settings, uses native G9 detail for
+PBRSkin, and retains source tangent normals for Uber only where a
+verified calibration is available. It can output native LIE color
+stacks and compatible eye, mouth, lash and tear material presets when
+their transfers are present. Shape transfer, grafts, geometry shells
+and other unsupported variants are not automatically converted; the
+report lists affected inputs. Fix or compare flagged joins and settings
+in DAZ before treating the conversion as final. There is no tuning panel
+in this release.
 
 ## Optional Local AI
 

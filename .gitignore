@@ -1,5 +1,7 @@
 .codex-local/
 .venv/
+*.egg-info/
+/forge/material_converter/uv_transfers/
 __pycache__/
 *.pyc
 .pytest_cache/

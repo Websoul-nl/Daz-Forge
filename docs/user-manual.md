@@ -177,7 +177,7 @@ If the source has a support image, Daz Forge can reuse it. Otherwise choose an i
    - `Genesis 9 -> Genesis 8 Male`
    - `Genesis 9 -> Genesis 8 Female + Male`
    - `Genesis 9 -> Genesis 8 Merged`
-3. Select a pose product zip or unpacked folder.
+3. Select a pose product zip, unpacked folder, or installed product DSX. You can drag a source onto the `Pose Converters` tab while that tab is open.
 4. Choose an output folder.
 5. Check product metadata:
    - Product name
@@ -196,6 +196,8 @@ The converter:
 - Builds a new DIM zip for the converted pose product.
 
 For `Genesis 8 -> Genesis 9`, Genesis 8 Female and Genesis 8 Male source poses both land under `People/Genesis 9/Poses`. If matching Female and Male inputs would create the same output file, Daz Forge adds `_F` and `_M` suffixes.
+
+For an installed product, select its DSX inside the library's `Runtime/Support` folder. The converter gathers that product's files, preserves its artists, product image and matching pose thumbnails, and creates a new converted DIM ZIP without changing the installed originals. Missing declared files or no poses matching the selected conversion direction block the build.
 
 For Genesis 9 to Genesis 8, choose whether to create Female, Male, both separate target folders, or a merged `People/Genesis 8/Poses` output.
 

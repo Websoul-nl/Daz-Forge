@@ -8,7 +8,8 @@ from zipfile import ZipFile
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
 from forge.analyzer.inference import infer_metadata
@@ -460,6 +461,75 @@ def test_pose_converter_prefills_readable_product_name_from_support_file(qapp, t
     window.set_pose_source_path(source)
 
     assert window.pose_product_name_edit.text() == "Road Trip Poses for Genesis 9"
+
+
+@pytest.mark.parametrize("converter_tab", [False, True])
+@pytest.mark.parametrize("suffix", [".dsx", ".zip", ""])
+def test_source_drop_routes_to_active_tab(qapp, tmp_path: Path, monkeypatch, converter_tab, suffix) -> None:
+    source = tmp_path / ("Product" + suffix)
+    calls = []
+    window = MainWindow(available_model_providers=())
+    monkeypatch.setattr(window, "set_pose_source_path", lambda path: calls.append(("pose", path)))
+    monkeypatch.setattr(window, "set_source_path", lambda path: calls.append(("dim", path)))
+    monkeypatch.setattr(window, "analyze_current_source", lambda: calls.append(("analyze", None)))
+    if converter_tab:
+        window.tabs.setCurrentWidget(window.pose_converter_page)
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(source))])
+    event = QDropEvent(QPointF(10, 10), Qt.DropAction.CopyAction, mime,
+                       Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+
+    window.dropEvent(event)
+
+    expected = [("pose" if converter_tab else "dim", source)]
+    if not converter_tab and suffix != ".dsx":
+        expected.append(("analyze", None))
+    assert calls == expected
+    assert event.isAccepted()
+
+
+def test_pose_converter_dsx_source_prefills_name_and_token(qapp, tmp_path: Path) -> None:
+    dsx = tmp_path / "Library" / "Runtime" / "Support" / "Product.dsx"
+    write_file(dsx, '''<ContentDBInstall VERSION="1.0"><Products>
+      <Product VALUE="Carry for Genesis 8 Female">
+        <StoreID VALUE="DAZ 3D"/><ProductToken VALUE="83577"/>
+        <Assets><Asset VALUE="/People/Genesis 8 Female/Poses/Carry/Pose.duf"/></Assets>
+      </Product></Products></ContentDBInstall>''')
+    window = MainWindow(available_model_providers=(), token_registry_path=tmp_path / "tokens.json")
+    window.set_pose_source_path(dsx)
+
+    assert window.pose_product_name_edit.text() == "Carry for Genesis 9"
+    assert window.pose_token_edit.text() == "83577"
+    assert not window.pose_source_edit.acceptDrops()
+
+
+def test_pose_converter_drop_and_build_installed_dsx(qapp, tmp_path: Path) -> None:
+    dsx = tmp_path / "Library" / "Runtime" / "Support" / "Product.dsx"
+    pose = "People/Genesis 8 Female/Poses/Carry/Pose.duf"
+    write_file(dsx.parents[2] / pose, dson("preset_pose"))
+    write_file(dsx, f'''<ContentDBInstall VERSION="1.0"><Products>
+      <Product VALUE="Carry for Genesis 8 Female">
+        <StoreID VALUE="DAZ 3D"/><ProductToken VALUE="83577"/>
+        <Artists><Artist VALUE="Original Artist"/></Artists>
+        <Assets><Asset VALUE="/{pose}"/></Assets>
+      </Product></Products></ContentDBInstall>''')
+    window = MainWindow(
+        available_model_providers=(), settings_path=tmp_path / "settings.json",
+        store_catalog_path=tmp_path / "stores.json", token_registry_path=tmp_path / "tokens.json",
+    )
+    window.tabs.setCurrentWidget(window.pose_converter_page)
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(dsx))])
+    event = QDropEvent(QPointF(10, 10), Qt.DropAction.CopyAction, mime,
+                       Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    window.dropEvent(event)
+    window.pose_output_edit.setText(str(tmp_path / "packages"))
+    window.pose_convert_button.click()
+
+    assert "Converted 1 pose file(s)" in window.pose_status_text.toPlainText()
+    archive_path = next((tmp_path / "packages").glob("*.zip"))
+    with ZipFile(archive_path) as archive:
+        assert "Content/People/Genesis 9/Poses/Carry/Pose.duf" in archive.namelist()
 
 
 def test_pose_converter_reuses_source_token_for_selected_store(qapp, tmp_path: Path) -> None:

@@ -397,6 +397,99 @@ def _require_road_trip_samples() -> None:
         pytest.skip("Road Trip pose converter calibration samples are local-only")
 
 
+def _installed_pose_product(tmp_path: Path, figure: str = "Genesis 8 Female") -> tuple[Path, Path]:
+    root = tmp_path / "Library"
+    pose = root / "People" / figure / "Poses" / "Carry" / "Carry 01.duf"
+    save_duf(_synthetic_pose("/" + pose.relative_to(root).as_posix()), pose, compressed=True)
+    write_file(pose.with_suffix(".duf.png"), b"thumbnail")
+    write_file(pose.with_suffix(".tip.png"), b"tip image")
+    # A neighboring product must not be picked up by a recursive library scan.
+    save_duf(_synthetic_pose("/Other.duf"), pose.with_name("Other.duf"), compressed=False)
+    dsx = root / "Runtime" / "Support" / "Selected.dsx"
+    write_text(dsx, f'''<ContentDBInstall VERSION="1.0"><Products>
+      <Product VALUE="Carry for {figure}">
+        <StoreID VALUE="DAZ 3D"/><ProductToken VALUE="83577"/>
+        <Artists><Artist VALUE="Original Artist"/></Artists>
+        <Assets><Asset VALUE="/{pose.relative_to(root).as_posix()}"/></Assets>
+      </Product></Products></ContentDBInstall>''')
+    write_file(dsx.with_suffix(".jpg"), b"product image")
+    return dsx, pose
+
+
+def test_build_converted_pose_package_from_installed_dsx(tmp_path: Path) -> None:
+    dsx, source_pose = _installed_pose_product(tmp_path)
+    original = source_pose.read_bytes()
+    result = build_converted_pose_dim_package(
+        dsx, tmp_path / "packages",
+        metadata={"product_name": "Carry for Genesis 9", "store_id": "LOCAL USER",
+                  "store_prefix": "WEB", "product_token": "83577"},
+    )
+
+    assert result.conversion_report.converted_count == 1
+    assert source_pose.read_bytes() == original
+    with ZipFile(result.package.zip_path) as archive:
+        names = archive.namelist()
+        target = "Content/People/Genesis 9/Poses/Carry/Carry 01.duf"
+        assert target in names
+        assert archive.read(target + ".png") == b"thumbnail"
+        assert archive.read(target.removesuffix(".duf") + ".tip.png") == b"tip image"
+        assert not any("Other.duf" in name or "Genesis 8 Female" in name for name in names)
+        support_name = next(name for name in names if name.startswith("Content/Runtime/Support/") and name.endswith(".dsx"))
+        support = archive.read(support_name).decode("utf-8")
+        assert '<Artist VALUE="Original Artist"/>' in support
+        assert '<Compatibility VALUE="/Genesis 9/Base"/>' in support
+        assert archive.read(support_name.removesuffix(".dsx") + ".jpg") == b"product image"
+
+
+def test_dsx_pose_conversion_rejects_missing_product_files(tmp_path: Path) -> None:
+    dsx, pose = _installed_pose_product(tmp_path)
+    pose.unlink()
+    with pytest.raises(ValueError, match="Product file missing"):
+        build_converted_pose_dim_package(dsx, tmp_path / "packages")
+    assert not list((tmp_path / "packages").glob("*.zip"))
+
+
+def test_dsx_pose_conversion_rejects_wrong_direction(tmp_path: Path) -> None:
+    dsx, _pose = _installed_pose_product(tmp_path, "Genesis 9")
+    with pytest.raises(ValueError, match="No .*pose"):
+        build_converted_pose_dim_package(dsx, tmp_path / "packages")
+    assert not list((tmp_path / "packages").glob("*.zip"))
+
+
+def test_dsx_pose_conversion_supports_reverse_direction(tmp_path: Path) -> None:
+    dsx, _pose = _installed_pose_product(tmp_path, "Genesis 9")
+    report = convert_pose_product(dsx, tmp_path / "converted", preset=PoseConversionPreset.G9_TO_G8_BOTH)
+    assert report.converted_count == 2
+    assert {output.output_path for output in report.outputs} == {
+        "People/Genesis 8 Female/Poses/Carry/Carry 01.duf",
+        "People/Genesis 8 Male/Poses/Carry/Carry 01.duf",
+    }
+
+
+def test_dsx_pose_conversion_keeps_female_and_male_pose_collisions(tmp_path: Path) -> None:
+    dsx, female = _installed_pose_product(tmp_path)
+    male = Path(str(female).replace("Genesis 8 Female", "Genesis 8 Male"))
+    save_duf(_synthetic_pose("/Male.duf"), male, compressed=False)
+    xml = dsx.read_text(encoding="utf-8")
+    male_path = male.relative_to(dsx.parents[2]).as_posix()
+    dsx.write_text(xml.replace("</Assets>", f'<Asset VALUE="/{male_path}"/></Assets>'), encoding="utf-8")
+
+    report = convert_pose_product(dsx, tmp_path / "converted")
+
+    assert report.converted_count == 2
+    assert {Path(output.output_path).name for output in report.outputs} == {"Carry 01_F.duf", "Carry 01_M.duf"}
+
+
+def test_dsx_pose_conversion_skips_non_pose_presets_in_pose_folders(tmp_path: Path) -> None:
+    dsx, pose = _installed_pose_product(tmp_path)
+    document = _synthetic_pose("/Material.duf")
+    document["asset_info"]["type"] = "preset_material"
+    save_duf(document, pose, compressed=False)
+
+    with pytest.raises(ValueError, match="No convertible pose"):
+        convert_pose_product(dsx, tmp_path / "converted")
+
+
 def _load_road_trip_g8_pose() -> dict:
     with ZipFile(ROAD_TRIP_ZIP) as archive:
         raw = archive.read(ROAD_TRIP_G8_PATH)

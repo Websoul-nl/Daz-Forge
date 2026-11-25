@@ -12,7 +12,7 @@ from zipfile import ZipFile, is_zipfile
 from forge.analyzer.inference import infer_metadata
 from forge.analyzer.inventory import classify_inventory
 from forge.analyzer.review_contract import build_review_contract, contract_to_dict
-from forge.analyzer.source import scan_source
+from forge.analyzer.source import read_source_file, scan_source
 from forge.analyzer.support import SupportMetadata, SupportParseError, parse_support_metadata
 from forge.packager.dim import DimPackageResult, build_dim_package
 from forge.pose_converter.converter import PoseConversionPreset, convert_pose
@@ -117,6 +117,10 @@ def convert_pose_product(
             skipped_files.append(source_file.content_path)
             continue
 
+        if source.suffix.lower() == ".dsx" and pose.get("asset_info", {}).get("type") != "preset_pose":
+            skipped_files.append(source_file.content_path)
+            continue
+
         result = convert_pose(pose, target.preset)
         output_content_path = target.output_content_path
         _set_asset_id(result.pose, output_content_path)
@@ -141,6 +145,9 @@ def convert_pose_product(
                 unmapped_bones=result.unmapped_bones,
             )
         )
+
+    if not outputs:
+        raise ValueError(f"No convertible pose files found for {preset.label} in {source}")
 
     report = PoseProductReport(
         source=str(source),
@@ -216,11 +223,18 @@ def _targets_for_source(source_file: _SourceFile, preset: PoseConversionPreset) 
 
 
 def _read_source_files(source: Path) -> list[_SourceFile]:
+    if source.is_file() and source.suffix.lower() == ".dsx":
+        scan = scan_source(source)
+        if scan.hard_errors:
+            raise ValueError("Cannot convert incomplete source: " + "; ".join(scan.hard_errors))
+        if scan.duplicates:
+            raise ValueError("Cannot convert source with duplicate content paths")
+        return [_SourceFile(item.content_path, read_source_file(scan, item)) for item in scan.files]
     if source.is_file() and is_zipfile(source):
         return _read_zip_source(source)
     if source.is_dir():
         return _read_folder_source(source)
-    raise ValueError(f"Source must be a zip file or folder: {source}")
+    raise ValueError(f"Source must be a zip file, folder or product DSX file: {source}")
 
 
 def _copy_source_support_image(source: Path, converted_folder: Path) -> str:
@@ -243,6 +257,8 @@ def _copy_source_support_image(source: Path, converted_folder: Path) -> str:
 
 
 def _source_support_metadata(source: Path) -> SupportMetadata | None:
+    if source.is_file() and source.suffix.lower() == ".dsx":
+        return parse_support_metadata(source.read_bytes())
     for source_file in sorted(_read_source_files(source), key=lambda item: item.content_path.lower()):
         path = PurePosixPath(source_file.content_path)
         if len(path.parts) < 3 or path.parts[0].lower() != "runtime" or path.parts[1].lower() != "support":

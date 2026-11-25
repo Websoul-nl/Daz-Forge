@@ -328,7 +328,8 @@ class MainWindow(QMainWindow):
         self.pose_preset_combo = QComboBox()
         self.pose_preset_combo.addItems([preset.label for preset in PoseConversionPreset])
         self.pose_source_edit = QLineEdit()
-        self.pose_source_edit.setPlaceholderText("Select a Genesis 8 or Genesis 9 pose product zip or folder")
+        self.pose_source_edit.setAcceptDrops(False)
+        self.pose_source_edit.setPlaceholderText("Select a Genesis 8 or Genesis 9 pose product zip, folder or DSX")
         self.pose_browse_source_button = QPushButton("Browse")
         self.pose_output_edit = QLineEdit()
         self.pose_output_edit.setPlaceholderText("Output folder")
@@ -358,6 +359,7 @@ class MainWindow(QMainWindow):
         self.pose_convert_button = QPushButton("Build Converted DIM Package")
         self.pose_convert_button.setObjectName("primaryPoseConvertButton")
         self.pose_status_text = QTextEdit()
+        self.pose_status_text.setAcceptDrops(False)
         self.pose_status_text.setPlaceholderText("Conversion status")
         self.summary_label = QLabel("No source analyzed")
         self.summary_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -530,9 +532,13 @@ class MainWindow(QMainWindow):
             return
         local_path = urls[0].toLocalFile()
         if local_path:
-            self.set_source_path(Path(local_path))
-            if Path(local_path).suffix.lower() != ".dsx":
-                self.analyze_current_source()
+            if self.tabs.currentWidget() is self.pose_converter_page:
+                self.set_pose_source_path(Path(local_path))
+            else:
+                self.set_source_path(Path(local_path))
+                if Path(local_path).suffix.lower() != ".dsx":
+                    self.analyze_current_source()
+            event.acceptProposedAction()
 
     def _build_layout(self) -> None:
         self.tabs = QTabWidget()
@@ -659,9 +665,9 @@ class MainWindow(QMainWindow):
     def _browse_pose_source(self) -> None:
         file_name, _selected_filter = QFileDialog.getOpenFileName(
             self,
-            "Select Pose Product Zip",
+            "Select Pose Product",
             "",
-            "DIM Zip (*.zip);;All Files (*.*)",
+            "Pose Products (*.zip *.dsx);;DIM Zip (*.zip);;Product DSX (*.dsx);;All Files (*.*)",
         )
         if file_name:
             self.set_pose_source_path(Path(file_name))
@@ -1932,6 +1938,11 @@ def _converted_pose_product_name(source: Path, preset: PoseConversionPreset = Po
 
 
 def _support_product_name_from_source(source: Path) -> str:
+    if source.is_file() and source.suffix.lower() == ".dsx":
+        try:
+            return parse_support_metadata(source.read_bytes()).product_name
+        except (OSError, SupportParseError):
+            return ""
     try:
         scan = scan_source(source)
     except Exception:

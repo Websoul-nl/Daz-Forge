@@ -219,6 +219,10 @@ def gather_dsx(dsx: Path, extra_libraries: Iterable[Path] = ()) -> SourceScan:
             thumbnail = _find_path(roots, path + suffix)
             if thumbnail:
                 declared.add(path + suffix)
+            if suffix.startswith(".tip."):
+                tip_path = PurePosixPath(path).with_suffix(suffix).as_posix()
+                if _find_path(roots, tip_path):
+                    declared.add(tip_path)
 
     owners = _other_product_owners(roots, selected)
     prefixes = _product_prefixes({

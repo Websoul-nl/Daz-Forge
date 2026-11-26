@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from urllib.parse import unquote
 from zipfile import ZipFile
 
 import numpy as np
@@ -9,7 +10,7 @@ from PySide6.QtCore import QEventLoop, QMimeData, QPointF, QTimer, Qt, QUrl
 from PySide6.QtGui import QDropEvent, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
-from forge.material_converter.atlas import write_pixels
+from forge.material_converter.atlas import read_pixels, write_pixels
 from forge.material_converter.character import (
     PBR, UBER, SHADER_FILE, SkinSource, TransferBundle, convert_character, has_bundled_transfers, inspect_skin,
 )
@@ -92,6 +93,46 @@ def test_pbr_does_not_export_uber_even_if_option_supplied(trial):
     assert [Path(path).name for path in result.presets] == ["01 Skin - PBRSkin.duf"]
 
 
+def test_texture_sizes_follow_the_maps_for_each_channel_and_keep_tangent_calibration(trial):
+    presets, library, transfer, out = trial
+    skin = extract_surfaces(read_dson(presets / "Iray.duf"))
+    color = np.full((2, 2, 4), .5, np.float32)
+    color[..., 3] = 1
+    normal = np.empty((8, 8, 4), np.float32)
+    normal[...] = [.7, .5, .96, 1]
+    write_pixels(library / "Runtime/Textures/Small.png", color, True)
+    write_pixels(library / "Runtime/Textures/LargeNormal.png", normal, False)
+    for surface in skin.values():
+        surface.channels["diffuse"]["image_file"] = "/Runtime/Textures/Small.png"
+        surface.channels["Normal Map"] = {
+            "image_file": "/Runtime/Textures/LargeNormal.png", "value": 1, "type": "float",
+        }
+    doc = build_g9_iray_uber_preset(skin, asset_id="/People/Iray.duf")
+    for material in doc["scene"]["materials"]:
+        material["uv_set"] = "/data/Daz 3D/Genesis 8/Male/Base.dsf#Base Male"
+    (presets / "Iray.duf").write_text(json.dumps(doc))
+    manifest = transfer / "G8 Base Male.json"
+    profile = json.loads(manifest.read_text())
+    frame = np.ones((4, 4, 2), np.float16)
+    frame[..., 0] = 0
+    np.savez(transfer / "frame.npz", cos_sin=frame, handedness=np.ones((4, 4), np.int8),
+             valid=np.ones((4, 4), bool))
+    for part in profile["parts"].values():
+        part["normal_transform"] = "frame.npz"
+    manifest.write_text(json.dumps(profile))
+
+    result = convert_character(presets/"Iray.duf", library, transfer, out, character_name="Mixed Resolution")
+    sizes = json.loads(result.report.read_text())["texture_sizes"]
+    diffuse = [size for url, size in sizes.items() if "_diffuse_" in url]
+    normals = [size for url, size in sizes.items() if "_Normal_Map_" in url]
+    assert diffuse == [[2, 2]] * 4
+    assert normals == [[8, 8]] * 4
+    head = next(url for url in sizes if "Head_Normal_Map_" in url)
+    projected = read_pixels(result.folder/"Content"/head.lstrip("/"), False)
+    assert projected[4, 4, 0] == pytest.approx(.5, abs=.001)
+    assert projected[4, 4, 1] == pytest.approx(.7, abs=.001)
+
+
 def test_optional_route_failure_keeps_the_uber_export_and_records_review(trial):
     presets, library, transfer, out = trial
     (library / SHADER_FILE).unlink()
@@ -102,13 +143,13 @@ def test_optional_route_failure_keeps_the_uber_export_and_records_review(trial):
     assert any(r["route"] == PBR and r["target"] == "Optional skin" for r in report["review"])
 
 
-def _make_overlay(presets):
+def _make_overlay(presets, texture="Skin.png"):
     source = SurfaceMaterial(
         channels={"diffuse": {"image": "#paint"}},
         slots={"diffuse":"diffuse"},
         images={"paint": {"map": [
             {"url": "/Runtime/Textures/SourcePlaceholder.jpg", "operation": "alpha_blend", "transparency": 1},
-            {"url": "/Runtime/Textures/Skin.png", "operation": "alpha_blend", "transparency": .6},
+            {"url": f"/Runtime/Textures/{texture}", "operation": "alpha_blend", "transparency": .6},
         ]}},
     )
     variant = presets / "Variant"
@@ -120,7 +161,8 @@ def _make_overlay(presets):
 
 def test_native_overlay_is_exported_by_type_and_uses_converted_skin(trial):
     presets, library, transfer, out = trial
-    paint = _make_overlay(presets)
+    write_pixels(library / "Runtime/Textures/LargeLayer.png", np.ones((8, 8, 4), np.float32), True)
+    paint = _make_overlay(presets, texture="LargeLayer.png")
     result = convert_character(presets/"Iray.duf", library, transfer, out, character_name="Paint",
                                variants_folder=paint.parent)
     [base, overlay] = (read_dson(result.folder / "Content" / path) for path in result.presets)
@@ -130,6 +172,8 @@ def test_native_overlay_is_exported_by_type_and_uses_converted_skin(trial):
     [underlay, ink] = definition["map"]
     assert underlay["url"] in {m["url"] for image in base["image_library"] for m in image["map"]}
     assert ink["transparency"] == .6
+    assert definition["map_size"] == [8, 8]
+    assert read_pixels(result.folder/"Content"/unquote(ink["url"]).lstrip("/"), True).shape == (8, 8, 4)
 
 
 def _make_product(presets, library):

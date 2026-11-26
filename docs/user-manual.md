@@ -248,6 +248,14 @@ report lists affected inputs. Fix or compare flagged joins and settings
 in DAZ before treating the conversion as final. There is no tuning panel
 in this release.
 
+Remapped textures use source-sized square outputs, up to 4096 pixels per side.
+For example, a 2K color map stays 2K even if its normal map is 4K. When several
+source maps contribute to one output, Forge uses the largest source so it
+does not lose detail. A layered image uses the largest of its base and paint
+layers for its shared canvas. Forge samples the source textures at the chosen
+size; it does not enlarge a previously baked texture. `Review.json` lists the
+exported map sizes.
+
 ## Optional Local AI
 
 Daz Forge can ask a local model for metadata suggestions. This is optional.

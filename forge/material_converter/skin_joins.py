@@ -1,4 +1,4 @@
-"""Narrow PBRSkin roughness equalization for matching atlas tiles."""
+"""Narrow PBRSkin roughness equalization across atlas tiles."""
 
 import numpy as np
 
@@ -26,7 +26,7 @@ def _strip(image, donor, field):
     return result
 
 
-def reconcile_roughness(geometry, uv_set, load, save, size):
+def reconcile_roughness(geometry, uv_set, load, save, sizes):
     """Align the narrow neighboring edges to Body without changing scalar settings."""
     zones = ("Head", "Arms", "Legs")
     edges = {z: paired_edges(geometry, uv_set, "Body", z) for z in zones}
@@ -34,7 +34,7 @@ def reconcile_roughness(geometry, uv_set, load, save, size):
         raise ValueError("Could not identify all Body roughness joins")
 
     def field(zone, pairs):
-        return boundary_lookup(pairs, rasterize_regions(geometry, uv_set, {zone:1}, size) > 0)
+        return boundary_lookup(pairs, rasterize_regions(geometry, uv_set, {zone:1}, sizes[zone]) > 0)
 
     body = load("Body")
     donor = _strip(body, body, field("Body", [(a,a) for pairs in edges.values() for a,_ in pairs]))

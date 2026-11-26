@@ -12,7 +12,7 @@ from urllib.parse import unquote
 import numpy as np
 from PySide6.QtGui import QImageReader
 
-from .atlas import project, read_pixels, read_transfer, sample, write_pixels
+from .atlas import TransferGrid, project, read_pixels, read_transfer, sample, texel_centers, write_pixels
 from .eye_lookup import pad_eye_roles
 from .g81_skin import resolve_g81_skin_layout
 from .g9_presets import G9_FIGURE, bind_g9_material_hierarchy
@@ -47,6 +47,7 @@ ATTACHMENTS = {
 SHADER_FILE = "data/DAZ 3D/Built-in Content/Daz Iray PBRSkin/PBRSkin.dsf"
 G9_DATA = "data/Daz 3D/Genesis 9/Base"
 BUNDLED_TRANSFERS = Path(__file__).with_name("uv_transfers")
+MAX_OUTPUT_SIZE = 4096
 IMAGE_DEFAULTS = dict(scale=1, offset=0, invert=False, horizontal_tiles=1, vertical_tiles=1,
                       horizontal_tiling_offset=0, vertical_tiling_offset=0, grayscale_mode="average")
 LAYER_DEFAULTS = dict(invert=False, rotation=0, xmirror=False, ymirror=False, xscale=1, yscale=1, xoffset=0, yoffset=0)
@@ -239,25 +240,29 @@ class TransferBundle:
             raise ValueError(f"{zone}: missing UV donor regions")
         return uv, ids, {i: slots[i] for i in sorted(present)}
 
-    def transform_normals(self, zone, pixels, ids):
+    def transform_normals(self, zone, pixels, ids, *, native_shape=None):
         relative = self.parts[zone].get("normal_transform")
         if not relative:
             raise ValueError("This UV bundle has no verified tangent calibration for the source normal")
         with np.load(_inside(self.root, relative), allow_pickle=False) as data:
             cs, sign, valid = data["cos_sin"], data["handedness"], data["valid"]
-        if (cs.shape != (*ids.shape, 2) or sign.shape != ids.shape or valid.shape != ids.shape
+        native_shape = ids.shape if native_shape is None else native_shape
+        if (cs.shape != (*native_shape, 2) or sign.shape != native_shape or valid.shape != native_shape
                 or valid.dtype != np.bool_):
             raise ValueError("Tangent calibration dimensions do not match the UV bundle")
+        # Sample the same nearest donor texel used by the resized lookup.
+        yn = (texel_centers(native_shape[0], ids.shape[0]) + .5).astype(np.intp)
+        xn = (texel_centers(native_shape[1], ids.shape[1]) + .5).astype(np.intp)
         covered = (ids != 0) & (pixels[..., 3] > .995)
-        usable = covered & valid
+        usable = covered & valid[yn[:, None], xn]
         if usable.sum() / max(np.count_nonzero(ids), 1) < .98:
             raise ValueError("Tangent calibration does not cover 98% of the projected normal")
-        source = pixels[..., :3].copy()
-        pixels[..., :3], pixels[..., 3] = [.5, .5, 1], 1
-        ys, xs = np.nonzero(usable)
-        for start in range(0, len(xs), 250_000):
-            y, x = ys[start:start+250_000], xs[start:start+250_000]
-            pixels[y,x,:3] = apply_transform(source[y,x], cs[y,x], sign[y,x])
+        pixels[~usable, :3] = [.5, .5, 1]
+        pixels[..., 3] = 1
+        for start in range(0, len(ids), 64):
+            y, x = np.nonzero(usable[start:start+64])
+            y += start
+            pixels[y, x, :3] = apply_transform(pixels[y, x, :3], cs[yn[y], xn[x]], sign[yn[y], xn[x]])
         return pixels
 
 
@@ -297,11 +302,12 @@ class _Export:
         self.textures.mkdir(parents=True)
         self.report = {
             "source": str(preset), "detected": asdict(source), "uv_transfer": str(bundle.manifest),
-            "presets": [], "review": [], "dependencies": [],
+            "presets": [], "review": [], "dependencies": [], "texture_sizes": {},
         }
         self.base = None
         self.has_lip_bake = False
         self.saved_pixels = {}
+        self.image_sizes = {}
 
     def review(self, route, target, reason, channel=None):
         item = {"route": route, "target": target, "reason": reason}
@@ -361,7 +367,22 @@ class _Export:
         write_pixels(path, pixels, color)
         url = "/" + path.relative_to(self.content).as_posix()
         self.saved_pixels[identity] = url
+        self.report["texture_sizes"][url] = [pixels.shape[1], pixels.shape[0]]
         return url
+
+    def map_size(self, paths, default, route, zone, key):
+        sizes = []
+        for path in set(paths) - {None}:
+            if path not in self.image_sizes:
+                size = QImageReader(str(path)).size()
+                self.image_sizes[path] = max(size.width(), size.height()) if not size.isEmpty() else max(
+                    read_pixels(path, False).shape[:2]
+                )
+            sizes.append(self.image_sizes[path])
+        requested = max(sizes, default=default)
+        if requested > MAX_OUTPUT_SIZE:
+            self.review(route, zone, f"Source exceeds the {MAX_OUTPUT_SIZE}px export limit.", key)
+        return min(requested, MAX_OUTPUT_SIZE)
 
     def emit(self, relative, doc, source=None):
         path = self.product / relative
@@ -397,7 +418,7 @@ class _Export:
             donors[i] = name, s
         return donors
 
-    def _project_channel(self, route, zone, key, primary, donors, uv, ids, *, bake, rule=None):
+    def _project_channel(self, route, zone, key, primary, donors, grid, *, bake, rule=None):
         primary_prop = primary.channels.get(key, {})
         color = _color(key, primary_prop)
         initial = primary_prop.get("value", [1, 1, 1] if color else 1)
@@ -410,7 +431,7 @@ class _Export:
         if not any(path for path, _ in inputs.values()) and not (
             rule or bake and any(v != initial for v in values)
         ):
-            return None, initial
+            return None, initial, None
         mixed = any(value != initial for value in values)
         if mixed and not bake:
             self.review(route, zone, "Regional slider values differ; kept the primary value.", key)
@@ -423,9 +444,11 @@ class _Export:
         else:
             inputs = {i: (path, 1) for i, (path, _) in inputs.items()}
             slider = initial
-        return project(uv, ids, inputs, color=color), slider
+        size = self.map_size((path for path, _ in inputs.values()), min(max(grid.ids.shape), 2048), route, zone, key)
+        uv, ids = grid.at_size(size)
+        return project(uv, ids, inputs, color=color), slider, ids
 
-    def _surface(self, route, zone, primary, donors, uv, ids, schema):
+    def _surface(self, route, zone, primary, donors, grid, schema):
         authored = self.skin[primary]
         mapped = {k for k, p in authored.channels.items() if has_texture(p)}
         preserved = route == PBR and self.source.shader == PBR
@@ -454,8 +477,8 @@ class _Export:
                 continue
             try:
                 rule = pbr_rules.get(key)
-                pixels, value = self._project_channel(
-                    route, zone, key, authored, donors, uv, ids, bake=preserved,
+                pixels, value, ids = self._project_channel(
+                    route, zone, key, authored, donors, grid, bake=preserved,
                     rule=rule.bake if rule else None,
                 )
                 if pixels is None:
@@ -467,7 +490,7 @@ class _Export:
                 if key == "Normal Map":
                     if any(self.image(s, key, False) is None for _, s in donors.values()):
                         raise ValueError("Some donor regions have no source normal; review the mixed normal binding")
-                    pixels = self.bundle.transform_normals(zone, pixels, ids)
+                    pixels = self.bundle.transform_normals(zone, pixels, ids, native_shape=grid.ids.shape)
                 if key == "diffuse" and route == PBR and not preserved:
                     base_pixels = pixels
                 maps[key] = self.put(route, zone, key, pixels, _color(key, authored.channels.get(key, {})))
@@ -530,7 +553,7 @@ class _Export:
             uv, ids, names = self.bundle.load(zone)
             progress(f"Converting {route}: {zone}")
             donors = self._skin_donors(zone, names, primary)
-            target[zone] = self._surface(route, zone, primary, donors, uv, ids, schema)
+            target[zone] = self._surface(route, zone, primary, donors, TransferGrid(uv, ids), schema)
         name = f"01 Skin - {route}.duf"
         asset = self.asset(name)
         if route == PBR:
@@ -581,19 +604,16 @@ class _Export:
         ) != 1:
             return
         paths = {z: self.content / unquote(p["image_file"]).lstrip("/") for z,p in props.items()}
-        dimensions = [QImageReader(str(p)).size() for p in paths.values()]
-        sizes = {(size.width(), size.height()) for size in dimensions}
-        if len(sizes) != 1:
-            return
-        [(width,height)] = sizes
-        if width != height or width <= 0:
+        dimensions = {zone: QImageReader(str(path)).size() for zone, path in paths.items()}
+        if any(size.isEmpty() or size.width() != size.height() for size in dimensions.values()):
             return
         progress("Checking and aligning PBRSkin roughness joins")
         replacements = {}
         try:
             geometry, uv_set = self._target_geometry()
             reconcile_roughness(geometry, uv_set, lambda z: read_pixels(paths[z], False),
-                                lambda z, pixels: replacements.update({z: self.put(PBR, z, "RoughnessJoin", pixels, False)}), width)
+                                lambda z, pixels: replacements.update({z: self.put(PBR, z, "RoughnessJoin", pixels, False)}),
+                                {zone: size.width() for zone, size in dimensions.items()})
         except (ValueError, KeyError, OSError) as exc:
             self.review(PBR, "Skin joins", f"Kept original projected roughness maps: {exc}")
         else:
@@ -613,18 +633,18 @@ class _Export:
             pairs = paired_edges(geometry, uv_set, "Body", zone)
             if not pairs:
                 raise ValueError(f"No shared edges for Body / {zone}")
-            coords = []
+            edges = []
             for idx in (0, 1):
                 points = []
                 for pair in pairs:
                     edge, center = pair[idx]
                     pos = edge[0] + np.array([[.25], [.5], [.75]]) * (edge[1] - edge[0])
                     shift = center-pos
-                    points.append(pos + shift * np.minimum(1, .5/4096/np.maximum(np.linalg.norm(shift, axis=1, keepdims=True), 1e-8)))
-                coords.append(np.concatenate(points))
+                    points.append((pos, shift))
+                edges.append(tuple(np.concatenate(columns) for columns in zip(*points, strict=True)))
             for key in ("Specular Lobe 1 Roughness", "Dual Lobe Specular Reflectivity", "Dual Lobe Specular Weight"):
                 values = []
-                for surface, points in zip((surfaces["Body"], surfaces[zone]), coords, strict=True):
+                for surface, (pos, shift) in zip((surfaces["Body"], surfaces[zone]), edges, strict=True):
                     prop = surface.channels.get(key, {})
                     value = prop.get("value")
                     if type(value) not in (int, float):
@@ -634,7 +654,12 @@ class _Export:
                         definition = surface.images[unquote(prop["image"].removeprefix("#"))]
                         [layer] = definition["map"]
                         url = layer["url"]
-                    samples = sample(read_pixels(self.content / unquote(url).lstrip("/"), False), points)[:,0] if url else 1
+                    samples = 1
+                    if url:
+                        image = read_pixels(self.content / unquote(url).lstrip("/"), False)
+                        length = np.maximum(np.linalg.norm(shift, axis=1, keepdims=True), 1e-8)
+                        points = pos + shift * np.minimum(1, .5 / max(image.shape[:2]) / length)
+                        samples = sample(image, points)[:,0]
                     values.append(samples * value)
                 if len(values) == 2:
                     delta = np.abs(values[0]-values[1])
@@ -651,6 +676,7 @@ class _Export:
         matched = set()
         for zone in ("Head", "Body", "Arms", "Legs"):
             uv, ids, names = self.bundle.load(zone)
+            grid = TransferGrid(uv, ids)
             for key in LIE_COLOR_SLOTS:
                 stacks = {}
                 for i, name in names.items():
@@ -683,10 +709,16 @@ class _Export:
                     image = base.images[unquote(prop.pop("image").removeprefix("#"))]
                     [layer] = image["map"]
                     prop["image_file"] = layer["url"]
-                stack = rebase_color_stack({"map_size": list(ids.shape[::-1]), "map_gamma": 0, "map": template}, prop)
-                for n, layer in enumerate(stack["map"][1:], 1):
-                    inputs = {i: (self.path(layers[n]["url"]), 1) for i, layers in stacks.items()}
-                    pixels = project(uv, ids, inputs, color=True)
+                stack = rebase_color_stack({"map_gamma": 0, "map": template}, prop)
+                layers_by_donor = [{i: (self.path(layers[n]["url"]), 1) for i, layers in stacks.items()}
+                                   for n in range(1, len(template))]
+                base_path = self.content / unquote(prop["image_file"]).lstrip("/")
+                paths = [base_path, *(path for inputs in layers_by_donor for path, _ in inputs.values())]
+                size = self.map_size(paths, max(ids.shape), "Overlays", zone, key)
+                stack["map_size"] = [size, size]
+                layer_uv, layer_ids = grid.at_size(size)
+                for n, (layer, inputs) in enumerate(zip(stack["map"][1:], layers_by_donor, strict=True), 1):
+                    pixels = project(layer_uv, layer_ids, inputs, color=True)
                     name = f"Overlay{index}_{key}_{n}"
                     layer["url"] = self.put("Overlays", zone, name, pixels, True)
                 planned.setdefault(zone, {})[key] = stack
@@ -707,6 +739,7 @@ class _Export:
             raise ValueError(f"No verified {part} UV transfer in this bundle")
         _, owner, targets, channels = ATTACHMENTS[part]
         uv, ids, names = self.bundle.load(part)
+        grid = TransferGrid(uv, ids)
         if part == "Eyes" and not {"Pupils", "Irises", "Sclera"} <= set(names.values()):
             raise ValueError("Eyes need a surface-aware pupil, iris and sclera transfer")
         missing = set(names.values()) - materials.keys()
@@ -716,14 +749,13 @@ class _Export:
         saved = {}
         for zone, primary in targets.items():
             subset = names if part != "Mouth" else {i:n for i,n in names.items() if n == primary}
-            target = np.where(np.isin(ids, list(subset)), ids, 0) if part == "Mouth" else ids
             donors = {i: (n, materials[n]) for i, n in subset.items()}
             props = {}
             for key in channels:
                 token = primary, key
                 if token not in saved:
-                    pixels, value = self._project_channel(
-                        "Accessories", part, key, materials[primary], donors, uv, target, bake=True,
+                    pixels, value, _ = self._project_channel(
+                        "Accessories", part, key, materials[primary], donors, grid, bake=True,
                     )
                     saved[token] = (
                         self.put("Accessories", part, f"{index}_{primary}_{key}", pixels,

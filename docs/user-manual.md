@@ -226,9 +226,11 @@ alter a DAZ scene, or overwrite an earlier export.
 
 The standard UV routes cover G8 Base Female and Base Male and G8.1 Female
 and Male on both legacy and native Base UVs. These are separate conversions,
-not a combined skin texture. Forge uses the matching bundle automatically.
-If it is missing, **UV transfer override** accepts the collection root or an
-individual conversion folder. Older collections using root-level
+not a combined skin texture. Forge uses the matching 2K bundle automatically
+when installed. To use a private 4K bundle, inspect the source, then check
+**Use a custom UV bundle**. **UV transfer override** accepts the collection
+root or an individual conversion folder. If the default is missing, the
+folder picker appears automatically. Older collections using root-level
 `<generation> <UV>.json` manifests still work. Forge does not guess another UV.
 
 Each conversion under `forge/material_converter/uv_transfers/` has a

@@ -292,8 +292,8 @@ def test_export_choices_follow_source_shader(trial):
     page.close()
 
 
-@pytest.mark.parametrize("with_bundle", (False, True))
-def test_character_tab_exports_on_worker_and_displays_review(trial, monkeypatch, with_bundle):
+@pytest.mark.parametrize(("with_bundle", "use_override"), ((False, False), (True, False), (True, True)))
+def test_character_tab_exports_on_worker_and_displays_review(trial, monkeypatch, with_bundle, use_override):
     presets, library, transfer, out = trial
     root = transfer if with_bundle else transfer / "Absent"
     monkeypatch.setattr("forge.ui.pages.character_conversion_page.BUNDLED_TRANSFERS", root)
@@ -302,9 +302,22 @@ def test_character_tab_exports_on_worker_and_displays_review(trial, monkeypatch,
     page.preset.setText(str(presets/"Iray.duf"))
     page.name.setText("Worker Test")
     page.library.setText(str(library))
-    page.transfer.setText(str(transfer / "Stale" if with_bundle else transfer))
+    expected = transfer
+    override = transfer
+    if with_bundle:
+        override = transfer / "Custom"
+        override.mkdir()
+        for name in ("G8 Base Male.json", "tile.npz"):
+            (override / name).write_bytes((transfer / name).read_bytes())
+        if use_override:
+            expected = override
+    page.transfer.setText(str(override))
     page.output.setText(str(out))
     page.inspect_button.click()
+    assert page.form.isRowVisible(page.custom_transfer) == with_bundle
+    if use_override:
+        page.custom_transfer.setChecked(True)
+    assert page.form.isRowVisible(page.transfer_row) == (not with_bundle or use_override)
     page.convert_button.click()
     loop = QEventLoop()
     page.thread.finished.connect(loop.quit)
@@ -316,5 +329,6 @@ def test_character_tab_exports_on_worker_and_displays_review(trial, monkeypatch,
         pytest.fail(f"Character export did not finish: {page.status.text()}")
     assert page.open_button.isEnabled(), page.status.text()
     assert page.report_path.is_file()
+    assert Path(json.loads(page.report_path.read_text())["uv_transfer"]).parent == expected
     assert "No variant folder selected" in page.review.toPlainText()
     page.close()

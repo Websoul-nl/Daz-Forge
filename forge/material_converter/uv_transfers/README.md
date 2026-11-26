@@ -17,8 +17,16 @@ and `<part>_uv.npz` files. An optional `<part>_tangent.npz` is paired with
 its exact lookup and lets Iray Uber retain source normal detail. Without
 calibration, the exporter reports omitted source normals. PBRSkin uses
 native G9 detail instead. Both nail surfaces share a single nail atlas. Only
-G8 Base Female has a verified nail tangent transform today. Its main maps are
-4K; the other layouts were calibrated at 2K.
+G8 Base Female has a verified nail tangent transform today.
+
+All six standard bundles use 2048 x 2048 lookup and calibration grids.
+The standard G8 Base Female data was sampled from the original 4K
+calibration. Output texture size still follows the source image, up to 4K.
+
+Keep personal 4K variants outside this tree, for example in a local
+`.codex-local/uv-transfers-4k/` collection. Use the same conversion folder
+names and manifest format, then select that collection through **Use a custom
+UV bundle**. The private variants do not belong in the default package.
 
 Locally prepared NPZ files contain numeric UV lookup and calibration
 arrays derived from installed figure geometry and UVs, not character

@@ -44,14 +44,15 @@ class CharacterConversionPage(QWidget):
         self.source = None
         self.product = None
         self.skin_path = None
-        self.uses_bundled_transfer = False
+        self.has_bundled_transfer = False
         self.report_path = None
         self.preset = QLineEdit()
         self.preset.setAcceptDrops(False)
         self.name = QLineEdit()
         self.library = QLineEdit()
+        self.custom_transfer = QCheckBox("Use a custom UV bundle")
         self.transfer = QLineEdit()
-        self.transfer.setPlaceholderText("Use bundled transfers")
+        self.transfer.setPlaceholderText("Select a UV bundle folder")
         self.variants = QLineEdit()
         self.output = QLineEdit(output)
         self.uv = QComboBox()
@@ -79,15 +80,16 @@ class CharacterConversionPage(QWidget):
         form.addRow("Character name", self.name)
         form.addRow("Source UV", self.uv)
         form.addRow("Genesis 9 base library", self._path_row(self.library))
+        form.addRow(self.custom_transfer)
         self.transfer_row = self._path_row(self.transfer)
         form.addRow("UV transfer override", self.transfer_row)
-        form.setRowVisible(self.transfer_row, not has_bundled_transfers(BUNDLED_TRANSFERS))
         self.variant_row = self._path_row(self.variants)
         form.addRow("Variant folder (optional)", self.variant_row)
         self.form = form
         form.addRow("Export folder", self._path_row(self.output))
         form.addRow("Export shader", self.route)
         form.addRow("", self.include_pbr)
+        self._sync_transfer_rows()
         actions = QHBoxLayout()
         actions.addStretch(1)
         for button in (self.inspect_button, self.convert_button, self.open_button):
@@ -103,6 +105,7 @@ class CharacterConversionPage(QWidget):
         self.preset.textChanged.connect(self._reset)
         self.uv.currentIndexChanged.connect(self._inspect_skin)
         self.skin_choices.currentIndexChanged.connect(self._inspect_skin)
+        self.custom_transfer.toggled.connect(self._sync_transfer_rows)
         self.inspect_button.clicked.connect(self.inspect)
         self.preset.returnPressed.connect(self.inspect)
         self.convert_button.clicked.connect(self._convert)
@@ -147,8 +150,9 @@ class CharacterConversionPage(QWidget):
 
     def _reset_skin(self):
         self.source = None
-        self.uses_bundled_transfer = False
-        self.form.setRowVisible(self.transfer_row, not has_bundled_transfers(BUNDLED_TRANSFERS))
+        self.has_bundled_transfer = False
+        self.custom_transfer.setChecked(False)
+        self._sync_transfer_rows()
         self.route.setText("No skin inspected")
         self.status.clear()
         self.include_pbr.setChecked(False)
@@ -157,6 +161,15 @@ class CharacterConversionPage(QWidget):
 
     def _confirmed_uv(self):
         return self.uv.currentText() if self.uv.currentIndex() else None
+
+    @Slot()
+    def _sync_transfer_rows(self):
+        self.form.setRowVisible(self.custom_transfer, self.source is not None and self.has_bundled_transfer)
+        if self.source is None:
+            show_picker = not has_bundled_transfers(BUNDLED_TRANSFERS)
+        else:
+            show_picker = not self.has_bundled_transfer or self.custom_transfer.isChecked()
+        self.form.setRowVisible(self.transfer_row, show_picker)
 
     @Slot()
     def inspect(self):
@@ -201,12 +214,12 @@ class CharacterConversionPage(QWidget):
         self.skin_path = path
         try:
             self.source = inspect_skin(read_dson(path), self._confirmed_uv())
-            self.uses_bundled_transfer = has_bundled_transfers(BUNDLED_TRANSFERS, self.source)
+            self.has_bundled_transfer = has_bundled_transfers(BUNDLED_TRANSFERS, self.source)
         except (OSError, ValueError, KeyError) as exc:
             self.source = None
             self.status.setText(str(exc))
             return
-        self.form.setRowVisible(self.transfer_row, not self.uses_bundled_transfer)
+        self._sync_transfer_rows()
         self.route.setText(self.source.routes[0])
         self.include_pbr.setVisible(self.source.shader == UBER)
         self.status.setText(f"{self.source.generation} | {self.source.uv} | {self.source.shader}")
@@ -216,7 +229,8 @@ class CharacterConversionPage(QWidget):
         return self.thread is not None
 
     def _set_running(self, running):
-        for widget in (*self._rows, self.name, self.uv, self.skin_choices, self.include_pbr, self.inspect_button):
+        for widget in (*self._rows, self.name, self.uv, self.skin_choices,
+                       self.custom_transfer, self.include_pbr, self.inspect_button):
             widget.setEnabled(not running)
         self.convert_button.setEnabled(not running and self.source is not None)
         self.open_button.setEnabled(not running and self.report_path is not None)
@@ -230,7 +244,7 @@ class CharacterConversionPage(QWidget):
             self.status.setText("Select the base library and export folder; enter the character name.")
             return
         override = None
-        if not self.uses_bundled_transfer:
+        if not self.has_bundled_transfer or self.custom_transfer.isChecked():
             if not self.transfer.text().strip():
                 self.status.setText("Select a UV transfer folder for this source layout.")
                 return

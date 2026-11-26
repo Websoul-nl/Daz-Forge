@@ -1,7 +1,8 @@
 .codex-local/
 .venv/
 *.egg-info/
-/forge/material_converter/uv_transfers/
+/forge/material_converter/uv_transfers/**/*.npz
+/forge/material_converter/uv_transfers/G8*.json
 __pycache__/
 *.pyc
 .pytest_cache/

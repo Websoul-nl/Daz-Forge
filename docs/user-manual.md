@@ -224,17 +224,19 @@ contains a private ZIP, the unpacked content, and `Review.json`. The
 tab shows the review items as well. Exporting does not install content,
 alter a DAZ scene, or overwrite an earlier export.
 
-The initial UV bundles cover G8 Base Female and Base Male, G8.1 native
-Female and Male, and G8.1 Male on legacy Base Male. Other layouts need
-their own verified transfer. Forge uses its bundled transfer data automatically.
-A source checkout without the bundles shows a **UV transfer override** folder
-picker. The selected folder must contain the layout manifests and their atlas
-files; Forge does not generate missing atlases or guess a replacement UV.
+The standard UV routes cover G8 Base Female and Base Male and G8.1 Female
+and Male on both legacy and native Base UVs. These are separate conversions,
+not a combined skin texture. Forge uses the matching bundle automatically.
+If it is missing, **UV transfer override** accepts the collection root or an
+individual conversion folder. Older collections using root-level
+`<generation> <UV>.json` manifests still work. Forge does not guess another UV.
 
-Release builds include the verified data staged under
-`forge/material_converter/uv_transfers/`. Stage the prepared layout manifests
-and their matching atlas directories there before building the wheel. The binary
-data is not tracked in Git.
+Each conversion under `forge/material_converter/uv_transfers/` has a
+`manifest.json` with local atlas paths. Files use `<part>_uv.npz` for lookups
+and `<part>_tangent.npz` for optional Iray Uber source-normal calibration.
+The G8.1 folder names distinguish `legacy` from `native`. See the
+[UV bundle notes](../forge/material_converter/uv_transfers/README.md)
+before packaging or distributing the data.
 
 Forge preserves supported skin settings, uses native G9 detail for
 PBRSkin, and retains source tangent normals for Uber only where a

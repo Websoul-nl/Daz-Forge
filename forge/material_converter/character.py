@@ -140,20 +140,90 @@ def _inside(root: Path, relative: str) -> Path:
     return path
 
 
+TRANSFER_MANIFEST = "manifest.json"
+_TRANSFER_SCHEMA = "daz-forge-uv-transfer/1"
+_TARGET_UV = "Base Multi UDIM"
+_REQUIRED_TRANSFER_PARTS = {"Head", "Body", "Arms", "Legs"}
+
+
+def transfer_bundle_name(generation: str, uv: str) -> str:
+    """Keep the figure generation and its authored UV layout independent."""
+    gender = uv.rsplit(" ", 1)[-1].lower()
+    if generation == "G8.1":
+        layout = "native" if uv.startswith("Base 8.1 ") else "legacy"
+        return f"g8-1-{layout}-{gender}-to-g9"
+    return f"g8-base-{gender}-to-g9"
+
+
+def find_transfer_manifest(path: Path, source: SkinSource) -> Path | None:
+    if path.is_file():
+        return path.resolve()
+    name = transfer_bundle_name(source.generation, source.uv)
+    first = None
+    for relative in (
+        f"{name}/{TRANSFER_MANIFEST}", TRANSFER_MANIFEST,
+        f"{source.generation} {source.uv}.json",
+    ):
+        candidate = path / relative
+        if candidate.is_file():
+            candidate = _inside(path, relative)
+            if first is None:
+                first = candidate
+            if _has_transfer_payload(candidate, source):
+                return candidate
+    return first
+
+
+def _read_transfer_manifest(manifest: Path, source: SkinSource | None = None) -> dict:
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or (data.get("schema"), data.get("target_uv")) != (_TRANSFER_SCHEMA, _TARGET_UV):
+        raise ValueError("Invalid Genesis 9 UV transfer manifest")
+    if source and (data.get("generation"), data.get("source_uv")) != (source.generation, source.uv):
+        raise ValueError("The UV transfer bundle does not match this source and Genesis 9")
+    parts = data.get("parts")
+    if not isinstance(parts, dict) or not _REQUIRED_TRANSFER_PARTS <= parts.keys():
+        raise ValueError("The transfer bundle needs Head, Body, Arms and Legs")
+    for zone, part in parts.items():
+        if (not isinstance(part, dict) or not isinstance(part.get("slots"), dict)
+                or not isinstance(part.get("file"), str) or not part["file"]
+                or ("normal_transform" in part
+                    and (not isinstance(part["normal_transform"], str) or not part["normal_transform"]))):
+            raise ValueError(f"{zone}: invalid UV transfer part")
+    return parts
+
+
+def _has_transfer_payload(manifest: Path, source: SkinSource | None = None) -> bool:
+    try:
+        parts = _read_transfer_manifest(manifest, source)
+        files = {part[key] for part in parts.values() for key in ("file", "normal_transform") if key in part}
+        return all(_inside(manifest.parent, relative).is_file() for relative in files)
+    except (OSError, ValueError):
+        return False
+
+
+def has_bundled_transfers(path: Path, source: SkinSource | None = None) -> bool:
+    if source:
+        try:
+            manifest = find_transfer_manifest(path, source)
+        except (OSError, ValueError):
+            return False
+        return manifest is not None and _has_transfer_payload(manifest, source)
+    root = path.resolve()
+    manifests = (path / TRANSFER_MANIFEST, *path.glob(f"*/{TRANSFER_MANIFEST}"), *path.glob("G8*.json"))
+    for manifest in manifests:
+        resolved = manifest.resolve()
+        if resolved.is_relative_to(root) and _has_transfer_payload(resolved):
+            return True
+    return False
+
+
 class TransferBundle:
     def __init__(self, path: Path, source: SkinSource):
-        manifest = path if path.is_file() else path / f"{source.generation} {source.uv}.json"
-        if not manifest.is_file():
-            raise ValueError(f"No transfer bundle for {source.generation} / {source.uv}: {manifest.name}")
-        data = json.loads(manifest.read_text(encoding="utf-8"))
-        if (data.get("schema"), data.get("generation"), data.get("source_uv"), data.get("target_uv")) != (
-            "daz-forge-uv-transfer/1", source.generation, source.uv, "Base Multi UDIM",
-        ):
-            raise ValueError("The UV transfer bundle does not match this source and Genesis 9")
-        self.manifest = manifest.resolve()
-        self.root, self.parts = self.manifest.parent, data["parts"]
-        if not {"Head", "Body", "Arms", "Legs"} <= self.parts.keys():
-            raise ValueError("The transfer bundle needs Head, Body, Arms and Legs")
+        manifest = find_transfer_manifest(path, source)
+        if manifest is None:
+            raise ValueError(f"No transfer bundle for {source.generation} / {source.uv} in {path}")
+        self.manifest = manifest
+        self.root, self.parts = manifest.parent, _read_transfer_manifest(manifest, source)
 
     def load(self, zone):
         part = self.parts[zone]

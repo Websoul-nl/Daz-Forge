@@ -10,7 +10,9 @@ from PySide6.QtGui import QDropEvent, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from forge.material_converter.atlas import write_pixels
-from forge.material_converter.character import PBR, UBER, SHADER_FILE, convert_character, inspect_skin
+from forge.material_converter.character import (
+    PBR, UBER, SHADER_FILE, SkinSource, TransferBundle, convert_character, has_bundled_transfers, inspect_skin,
+)
 from forge.material_converter.layered_color import as_native_lie_preset
 from forge.material_converter.pbr_presets import SurfaceMaterial, build_g9_material_preset, extract_surfaces, read_dson
 from forge.material_converter.product import load_character_product
@@ -153,6 +155,10 @@ def test_dsx_uses_bundled_transfer_and_only_exports_declared_variants(trial, mon
     assert [row.path.name for row in product.skins] == ["Iray.duf", "PBR.duf"]
     assert [path.name for path in product.variants] == ["T04.duf"]
     assert product.missing == ("People/Missing.duf",)
+    nested = transfer / "g8-base-male-to-g9"
+    nested.mkdir()
+    (transfer / "tile.npz").rename(nested / "tile.npz")
+    (transfer / "G8 Base Male.json").rename(nested / "manifest.json")
     monkeypatch.setattr("forge.material_converter.character.BUNDLED_TRANSFERS", transfer)
     result = convert_character(presets/"Iray.duf", library, None, out, character_name="Product", product_dsx=dsx)
     assert [Path(path).name for path in result.presets] == ["01 Skin - Iray Uber.duf", "T04.duf"]
@@ -160,6 +166,40 @@ def test_dsx_uses_bundled_transfer_and_only_exports_declared_variants(trial, mon
     assert report["product_dsx"] == str(dsx)
     assert any("Missing.duf" in row["target"] for row in report["review"])
     assert any("PBR.duf" in row["target"] for row in report["review"])
+
+
+def test_transfer_discovery_accepts_old_and_new_paths_and_prefers_new(trial):
+    _, _, transfer, _ = trial
+    source = SkinSource("G8", "Base Male", UBER, None, False)
+    legacy = transfer / "G8 Base Male.json"
+    assert TransferBundle(transfer, source).manifest == legacy
+    nested = transfer / "g8-base-male-to-g9"
+    nested.mkdir()
+    manifest = nested / "manifest.json"
+    manifest.write_bytes(legacy.read_bytes())
+    assert has_bundled_transfers(transfer, source)
+    assert TransferBundle(transfer, source).manifest == legacy
+    (nested / "tile.npz").write_bytes((transfer / "tile.npz").read_bytes())
+    assert has_bundled_transfers(transfer, source)
+    for location in (transfer, nested, manifest):
+        bundle = TransferBundle(location, source)
+        assert bundle.manifest == manifest
+        assert bundle.load("Head")[2] == {1: "Face"}
+    assert TransferBundle(legacy, source).manifest == legacy
+    with pytest.raises(ValueError, match="does not match"):
+        TransferBundle(nested, SkinSource("G8.1", "Base Male", UBER, None, False))
+
+
+def test_character_tab_offers_override_for_missing_specific_bundle(trial, monkeypatch):
+    presets, _, transfer, _ = trial
+    monkeypatch.setattr("forge.ui.pages.character_conversion_page.BUNDLED_TRANSFERS", transfer)
+    page = CharacterConversionPage()
+    page.set_source(presets / "Iray.duf")
+    assert not page.form.isRowVisible(page.transfer_row)
+    (transfer / "tile.npz").unlink()
+    page.inspect()
+    assert page.form.isRowVisible(page.transfer_row)
+    page.close()
 
 
 def test_character_tab_accepts_dsx_drop_and_requires_a_choice(trial):
@@ -208,13 +248,17 @@ def test_export_choices_follow_source_shader(trial):
     page.close()
 
 
-def test_character_tab_exports_on_worker_and_displays_review(trial):
+@pytest.mark.parametrize("with_bundle", (False, True))
+def test_character_tab_exports_on_worker_and_displays_review(trial, monkeypatch, with_bundle):
     presets, library, transfer, out = trial
+    root = transfer if with_bundle else transfer / "Absent"
+    monkeypatch.setattr("forge.ui.pages.character_conversion_page.BUNDLED_TRANSFERS", root)
+    monkeypatch.setattr("forge.material_converter.character.BUNDLED_TRANSFERS", root)
     page = CharacterConversionPage()
     page.preset.setText(str(presets/"Iray.duf"))
     page.name.setText("Worker Test")
     page.library.setText(str(library))
-    page.transfer.setText(str(transfer))
+    page.transfer.setText(str(transfer / "Stale" if with_bundle else transfer))
     page.output.setText(str(out))
     page.inspect_button.click()
     page.convert_button.click()

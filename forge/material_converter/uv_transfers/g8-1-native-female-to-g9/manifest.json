@@ -1,0 +1,153 @@
+{
+  "schema": "daz-forge-uv-transfer/1",
+  "generation": "G8.1",
+  "source_uv": "Base 8.1 Female",
+  "target_uv": "Base Multi UDIM",
+  "parts": {
+    "Head": {
+      "file": "head_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      },
+      "normal_transform": "head_tangent.npz"
+    },
+    "Body": {
+      "file": "body_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      },
+      "normal_transform": "body_tangent.npz"
+    },
+    "Arms": {
+      "file": "arms_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      },
+      "normal_transform": "arms_tangent.npz"
+    },
+    "Legs": {
+      "file": "legs_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      },
+      "normal_transform": "legs_tangent.npz"
+    },
+    "Fingernails": {
+      "file": "nails_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      }
+    },
+    "Toenails": {
+      "file": "nails_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      }
+    },
+    "Eyes": {
+      "file": "eyes_uv.npz",
+      "slots": {
+        "1": "Pupils",
+        "2": "Irises",
+        "3": "Sclera",
+        "4": "Sclera"
+      },
+      "labels": "roles"
+    },
+    "Mouth": {
+      "file": "mouth_uv.npz",
+      "slots": {
+        "1": "Mouth",
+        "2": "Teeth"
+      }
+    },
+    "MouthCavity": {
+      "file": "mouth_cavity_uv.npz",
+      "slots": {
+        "1": "Mouth"
+      }
+    },
+    "Lashes": {
+      "file": "lashes_uv.npz",
+      "slots": {
+        "1": "Eyelashes"
+      }
+    },
+    "Tear": {
+      "file": "tear_uv.npz",
+      "slots": {
+        "1": "Tear"
+      }
+    }
+  },
+  "sha256": {
+    "arms_tangent.npz": "41b875ffeb9175d26703933d2b8781da664c686fb646b7277c508404b62d5167",
+    "arms_uv.npz": "9474ea81b8fb27c4f8f52ecb6c8154f98103871e3791b171b048030d9a3fbbdd",
+    "body_tangent.npz": "b87cf9089c173db1229232351c927086ca3e2a32dac6ddad20a4c9359e74c011",
+    "body_uv.npz": "afc1d8745c43521f6fa7ad1646c5055e9880c1926dedb38a81e06b42a076045b",
+    "eyes_uv.npz": "6a06ebbf24884f52d591bbb77886d69e51016c2707bad3bae30fff50f429f33c",
+    "head_tangent.npz": "beacb33730f9c9cf32119a419cd87009f38ac80c3204e25cf1b7bf989a97d403",
+    "head_uv.npz": "b33c9c0942b952cd5b731433a43dd0688ed52e0192d3de64f4dff465ded615ea",
+    "lashes_uv.npz": "682428bb976e96d74aaab9064604d7d02e7c44e97cc80fe2e5cda8a7f144ee41",
+    "legs_tangent.npz": "9512e0e562db162ed2ead7f49d38e3b8b87154f8a2b2b3581c15b246452b497f",
+    "legs_uv.npz": "bad49f76a19f9044ae31eb969daad626295172ae2fc843b6bb2dd630ab3f1837",
+    "mouth_cavity_uv.npz": "ab03bbbb4d39301e869ed6f1a246aa0cc4baf67d2c6330898faa102866a655a8",
+    "mouth_uv.npz": "fb5b1bbef4b251167e9756195f89854c04b945b726d2486be9a6699858e2f10a",
+    "nails_uv.npz": "7b20eb7739689b1feeaa034db308443fb116e955cdf1db7c4221797338779417",
+    "tear_uv.npz": "f19ba2dda5d6e5f1b28a2bd33b9770ca8889c615939567d57e25c74f6db05337"
+  }
+}

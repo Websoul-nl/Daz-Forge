@@ -1,0 +1,137 @@
+{
+  "schema": "daz-forge-uv-transfer/1",
+  "generation": "G8.1",
+  "source_uv": "Base Male",
+  "target_uv": "Base Multi UDIM",
+  "parts": {
+    "Head": {
+      "file": "head_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      },
+      "normal_transform": "head_tangent.npz"
+    },
+    "Body": {
+      "file": "body_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      },
+      "normal_transform": "body_tangent.npz"
+    },
+    "Arms": {
+      "file": "arms_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      },
+      "normal_transform": "arms_tangent.npz"
+    },
+    "Legs": {
+      "file": "legs_uv.npz",
+      "slots": {
+        "1": "Face",
+        "2": "Lips",
+        "3": "Ears",
+        "4": "EyeSocket",
+        "5": "Head",
+        "6": "Body",
+        "7": "Arms",
+        "8": "Legs",
+        "9": "Fingernails",
+        "10": "Toenails"
+      },
+      "normal_transform": "legs_tangent.npz"
+    },
+    "Fingernails": {
+      "file": "nails_uv.npz",
+      "slots": {
+        "6": "Fingernails",
+        "7": "Toenails"
+      }
+    },
+    "Toenails": {
+      "file": "nails_uv.npz",
+      "slots": {
+        "6": "Fingernails",
+        "7": "Toenails"
+      }
+    },
+    "Eyes": {
+      "file": "eyes_uv.npz",
+      "slots": {
+        "1": "Pupils",
+        "2": "Irises",
+        "3": "Sclera",
+        "4": "Sclera"
+      },
+      "labels": "roles"
+    },
+    "Mouth": {
+      "file": "mouth_uv.npz",
+      "slots": {
+        "1": "Mouth",
+        "2": "Teeth"
+      }
+    },
+    "MouthCavity": {
+      "file": "mouth_cavity_uv.npz",
+      "slots": {
+        "1": "Mouth"
+      }
+    },
+    "Lashes": {
+      "file": "lashes_uv.npz",
+      "slots": {
+        "1": "Eyelashes"
+      }
+    },
+    "Tear": {
+      "file": "tear_uv.npz",
+      "slots": {
+        "1": "Tear"
+      }
+    }
+  },
+  "sha256": {
+    "arms_tangent.npz": "d2e2be35b52601657cee714c766bddfcdfb8adf0b04ecf1b073e1839372e78eb",
+    "arms_uv.npz": "7b22de89b6f7c28a731066986182c30bf16e9491465a56266c90b60edbc7898a",
+    "body_tangent.npz": "df4bc33431c1dcbab5d2241e0f468eabdf9e254798d10b188d3a49c6db300ae7",
+    "body_uv.npz": "acb640561dc764c4d408c815695d876d510ba14dc6d648367c1c7199dabf67dd",
+    "eyes_uv.npz": "550ddf1397c730e9a3896d7826a93843306c925e48da0eb66c6d30faaffdee86",
+    "head_tangent.npz": "d75ce6dbdc05c48ed7d55a69e2b83587e1ec745babb30948184995b4758cfd05",
+    "head_uv.npz": "92dc143190224a1036a71e77c2c68cf3357c1478e800b308140da6d3b3a9c2c9",
+    "lashes_uv.npz": "fe2ee24a20e217c9037ab0f817e8124dbe05eb813669a248953b27133cf734bc",
+    "legs_tangent.npz": "b8e2657fd139666f8d648223dbe2d982ecfc4fa7458eaef0714f34b28d2179be",
+    "legs_uv.npz": "350474b7d60bc218987e5392df0ad8dca1c08ea44eb5163fc44c4018064b4627",
+    "mouth_cavity_uv.npz": "3ea1405f864e3a1429f9eebf4674a3ed34adf40a3077e7e096ad7c1fcb6d4541",
+    "mouth_uv.npz": "730cdafc8942b0394d11011ebeff48ec4310a8b03fe57eb0c3045bc3cf0c1dcf",
+    "nails_uv.npz": "c0cf193ed2e1f2c02a46716fee356fc044186762ebf56389fe270530b10d061f",
+    "tear_uv.npz": "77d6cb188d1a16f02168b3c7c5393a4106a7a8e89b657cda43007385e3d42975"
+  }
+}

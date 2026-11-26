@@ -698,7 +698,9 @@ class _Export:
                 if not stacks:
                     continue
                 template = next(iter(stacks.values()))
-                signature = lambda layers: [(p.get("operation"), p.get("transparency")) for p in layers]
+                def signature(layers):
+                    return [(p.get("operation"), p.get("transparency")) for p in layers]
+
                 if any(signature(layers) != signature(template) for layers in stacks.values()) or any(
                     p.get("operation") not in {"alpha_blend", "multiply"} for p in template
                 ):

@@ -93,7 +93,7 @@ def _same(a,b):
         return len(a)==len(b) and all(_same(x,y) for x,y in zip(a,b,strict=True))
     if type(a) in (float,int) and type(b) in (float,int):
         return math.isclose(a,b,rel_tol=0,abs_tol=1e-6)
-    return type(a)==type(b) and a==b
+    return type(a) is type(b) and a==b
 
 
 def _mapped(prop):
